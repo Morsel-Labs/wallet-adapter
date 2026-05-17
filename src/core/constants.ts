@@ -1,0 +1,3 @@
+export const MORSEL_COOKIE_WALLET_NAME = 'Morsel Cookie Wallet';
+export const MORSEL_COOKIE_WALLET_URL = 'https://www.morselwallet.app/install';
+export const MORSEL_COOKIE_WALLET_ICON = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTEyIDJDMTMuMSAyIDE0IDIuOSAxNCA0VjIwQzE0IDIxLjEgMTMuMSAyMiAxMiAyMkMxMC45IDIyIDEwIDIxLjEgMTAgMjBWNEMxMCAyLjkgMTAuOSAyIDEyIDJaIiBmaWxsPSIjMDAwIi8+Cjwvc3ZnPg=='; // Placeholder icon
