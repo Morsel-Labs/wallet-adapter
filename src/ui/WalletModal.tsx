@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import QRCode from 'qrcode';
 import { useWallet } from '../react';
 import { useWalletModal } from './WalletModalProvider';
@@ -352,7 +352,9 @@ export function WalletModal({
 
   const handleCardAction = (card: WalletCardModel) => {
     if (card.actionDisabled) return;
-    if (card.isInstalled) {
+    // Morsel is always connectable (QR / relay), so never route it to an install page.
+    const isMorselCard = card.adapter.name.toLowerCase().includes('morsel');
+    if (card.isInstalled || isMorselCard) {
       void handleConnect(card.index);
       return;
     }
@@ -407,12 +409,20 @@ export function WalletModal({
       const isHovered = !mobile && hoveredIndex === card.index;
       const icon = getResolvedWalletIcon(card.adapter.name, card.adapter.icon);
       const isMorselCard = card.adapter.name.toLowerCase().includes('morsel');
-      const isSelectedNotInstalled = card.visualState === 'Selected' && !card.isInstalled;
+      // Morsel connects via the QR / relay session even without a browser extension,
+      // so it is ALWAYS connectable — never show "Install" for it.
+      const morselHighlight = isMorselCard && !card.isConnected;
       const displayBadge = isMorselCard ? 'Recommended' : card.visualState;
-      const displayAction = isMorselCard && isSelectedNotInstalled ? 'Install' : (card.actionLabel === 'Install Wallet' ? 'Install' : card.actionLabel);
-      const displayActionColor = isMorselCard && isSelectedNotInstalled ? '#ffffff' : (card.isConnected ? t.success : card.isInstalled ? t.accent : t.textMuted);
-      const displayActionBg = isMorselCard && isSelectedNotInstalled ? '#5b5bf7' : (card.isConnected ? t.successSoft : card.isInstalled ? t.accentSoft : t.mutedSoft);
-      const displayActionBorder = isMorselCard && isSelectedNotInstalled ? '#5b5bf7' : (card.isConnected ? t.successSoft : card.isInstalled ? t.accentSoft : t.border);
+      const displayAction = card.isConnected
+        ? card.actionLabel
+        : isMorselCard
+          ? connectLabel
+          : card.isInstalled
+            ? card.actionLabel
+            : 'Install';
+      const displayActionColor = morselHighlight ? '#ffffff' : (card.isConnected ? t.success : card.isInstalled ? t.accent : t.textMuted);
+      const displayActionBg = morselHighlight ? '#5b5bf7' : (card.isConnected ? t.successSoft : card.isInstalled ? t.accentSoft : t.mutedSoft);
+      const displayActionBorder = morselHighlight ? '#5b5bf7' : (card.isConnected ? t.successSoft : card.isInstalled ? t.accentSoft : t.border);
       const tileActive = card.isConnected || card.isActive;
       const displayName = card.adapter.name === 'Morsel Cookie Wallet' ? 'Morsel Wallet' : card.adapter.name;
 
@@ -516,7 +526,7 @@ export function WalletModal({
       );
     };
 
-    // β”€β”€ MOBILE: bottom sheet β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€
+    // ── MOBILE: bottom sheet ─────────────────────────────────
     if (isMobile) {
       const iconBtnStyle: React.CSSProperties = {
         width: 36, height: 36, borderRadius: '50%',
@@ -676,7 +686,7 @@ export function WalletModal({
       );
     }
 
-    // β”€β”€ DESKTOP: two-column β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€
+    // ── DESKTOP: two-column ──────────────────────────────────
     return (
       <div
         className={overlayClassName}
@@ -720,7 +730,7 @@ export function WalletModal({
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: `${SPACE[12]}px` }}>
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: `${SPACE[4]}px` }}>
-                <a href="https://connect.morselwallet.app" target="_blank" rel="noreferrer" style={{ ...TYPE.tiny, color: t.accent, textDecoration: 'none' }}>More info β†—</a>
+                <a href="https://connect.morselwallet.app" target="_blank" rel="noreferrer" style={{ ...TYPE.tiny, color: t.accent, textDecoration: 'none' }}>More info ↗</a>
                 <span style={{ ...TYPE.tiny, color: t.textMuted }}>connect.morselwallet.app</span>
               </div>
               <button onClick={close} aria-label="Close" style={{
@@ -728,13 +738,13 @@ export function WalletModal({
                 padding: '0', borderRadius: `${RADIUS[20]}px`,
                 border: `1px solid ${t.closeBorder}`, background: t.closeBg,
                 color: t.textPrimary, ...TYPE.body, cursor: 'pointer',
-              }}>Γ—</button>
+              }}>×</button>
             </div>
           </div>
 
           {/* body */}
           <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
-            {/* left β€” QR */}
+            {/* left — QR */}
             <div style={{
               width: LAYOUT.leftColumnWidth, flexShrink: 0,
               padding: `${SPACE[24]}px`,
@@ -770,7 +780,7 @@ export function WalletModal({
                 animation: qrDataUrl && timeLeft > 0 ? 'morsel-qr-glow 3.5s ease-in-out infinite' : 'none',
                 transition: 'box-shadow 600ms ease',
               }}>
-                {/* Generating state β€” spinner + label */}
+                {/* Generating state — spinner + label */}
                 {(!qrDataUrl || timeLeft === 0) && (
                   <div style={{
                     width: '100%', height: '100%',
@@ -783,7 +793,7 @@ export function WalletModal({
                       borderTopColor: t.accent,
                       animation: 'morsel-spin 0.75s linear infinite',
                     }} />
-                    <span style={{ fontSize: 12, fontWeight: 500, color: t.textMuted }}>Generatingβ€¦</span>
+                    <span style={{ fontSize: 12, fontWeight: 500, color: t.textMuted }}>Generating…</span>
                   </div>
                 )}
 
@@ -800,7 +810,7 @@ export function WalletModal({
                   />
                 )}
 
-                {/* Center logo overlay β€” only when QR is live */}
+                {/* Center logo overlay — only when QR is live */}
                 {qrDataUrl && timeLeft > 0 && (
                   <div style={{
                     position: 'absolute', top: '50%', left: '50%',
@@ -815,7 +825,7 @@ export function WalletModal({
                 )}
               </div>
 
-              {/* Timer β€” only when QR is live */}
+              {/* Timer — only when QR is live */}
               {qrDataUrl && timeLeft > 0 && (() => {
                 const mins = Math.floor(timeLeft / 60);
                 const secs = String(timeLeft % 60).padStart(2, '0');
@@ -831,7 +841,7 @@ export function WalletModal({
               })()}
             </div>
 
-            {/* right β€” wallet list */}
+            {/* right — wallet list */}
             <div style={{
               flex: 1, minWidth: 0,
               padding: `${SPACE[24]}px`,
