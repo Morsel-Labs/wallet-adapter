@@ -318,18 +318,14 @@ export function WalletModal({
     [adapters, activeAdapterIndex, connected, connectLabel, connecting, installLabel]
   );
 
-  const COOKIE_CHAIN_WALLET_NAMES = ['morsel', 'nightly', 'backpack'];
-
+  // Show every detected Solana wallet — no network gating. Only the search box filters.
   const filteredCards = useMemo(() => {
     const search = searchTerm.trim().toLowerCase();
     return walletCards.filter(({ adapter }) => {
       const name = adapter.name.toLowerCase();
-      if (selectedNetwork.id === 'cookie-chain') {
-        if (!COOKIE_CHAIN_WALLET_NAMES.some(n => name.includes(n))) return false;
-      }
       return !search || name.includes(search);
     });
-  }, [walletCards, searchTerm, selectedNetwork.id]);
+  }, [walletCards, searchTerm]);
 
   const handleConnect = async (adapterIndex: number) => {
     try {
