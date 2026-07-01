@@ -3,7 +3,7 @@
   "version": "0.1.1",
   "description": "Wallet adapter for Morsel / Cookie Chain — core, React hooks, and UI",
   "scripts": {
-    "build": "tsc && node scripts/copy-assets.mjs",
+    "build": "tsc && node scripts/fix-extensions.mjs && node scripts/copy-assets.mjs",
     "prepare": "npm run build",
     "typecheck": "tsc --noEmit"
   },
