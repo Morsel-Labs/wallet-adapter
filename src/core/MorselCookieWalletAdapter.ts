@@ -7,20 +7,13 @@ import { WalletAdapterError, WalletNotFoundError, WalletNotConnectedError, Walle
 import { detectMorselCookieProvider, detectStandardMorselProvider } from './detect';
 import { MORSEL_COOKIE_WALLET_NAME, MORSEL_COOKIE_WALLET_URL, MORSEL_COOKIE_WALLET_ICON, morselBrowseLink } from './constants';
 import { CookieWalletAdapter } from './CookieWalletAdapter';
+import { toBase64, fromBase64, toBase64Url } from './base64';
 
 const RELAY_BASE = 'wss://api.dumpsack.xyz';
 
 
-function toBase64url(bytes: Uint8Array): string {
-  return Buffer.from(bytes).toString('base64')
-    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
-
-function fromBase64url(str: string): Uint8Array {
-  const b64 = str.replace(/-/g, '+').replace(/_/g, '/');
-  const padded = b64 + '='.repeat((4 - b64.length % 4) % 4);
-  return new Uint8Array(Buffer.from(padded, 'base64'));
-}
+const toBase64url = toBase64Url;
+const fromBase64url = fromBase64;
 
 function generateSessionId(): string {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
@@ -38,11 +31,11 @@ function encrypt(msg: object, theirPubKey: Uint8Array, mySecretKey: Uint8Array):
   const combined = new Uint8Array(24 + ciphertext.length);
   combined.set(nonce);
   combined.set(ciphertext, 24);
-  return Buffer.from(combined).toString('base64');
+  return toBase64(combined);
 }
 
 function decrypt(payload: string, theirPubKey: Uint8Array, mySecretKey: Uint8Array): any {
-  const combined = new Uint8Array(Buffer.from(payload, 'base64'));
+  const combined = fromBase64(payload);
   const nonce = combined.slice(0, 24);
   const ciphertext = combined.slice(24);
   const plaintext = nacl.box.open(ciphertext, nonce, theirPubKey, mySecretKey);
@@ -484,10 +477,10 @@ export class MorselCookieWalletAdapter extends EventEmitter<AdapterEvents> imple
           : transaction.serialize({ requireAllSignatures: false, verifySignatures: false });
         const id = generateRequestId();
         const result = await this.relaySession.sendRequest(
-          { type: 'sign_transaction', id, transaction: Buffer.from(bytes).toString('base64') },
+          { type: 'sign_transaction', id, transaction: toBase64(bytes) },
           60_000
         );
-        const signed = Buffer.from(result.transaction, 'base64') as unknown as Uint8Array;
+        const signed = fromBase64(result.transaction);
         return isVersioned ? VersionedTransaction.deserialize(signed) : Transaction.from(signed as any);
       } catch (error) {
         const walletError = new WalletSignTransactionError(error instanceof Error ? error.message : 'Unknown error');
@@ -525,12 +518,12 @@ export class MorselCookieWalletAdapter extends EventEmitter<AdapterEvents> imple
         } else if (Array.isArray(result) && result.every(x => typeof x === 'number')) {
           signature = new Uint8Array(result);
         } else if (typeof result === 'string') {
-          signature = Uint8Array.from(Buffer.from(result, 'base64'));
+          signature = fromBase64(result);
         } else if (result && typeof result === 'object' && 'signature' in result) {
           const sig = (result as any).signature;
           if (sig instanceof Uint8Array) signature = sig;
           else if (Array.isArray(sig)) signature = new Uint8Array(sig);
-          else if (typeof sig === 'string') signature = Uint8Array.from(Buffer.from(sig, 'base64'));
+          else if (typeof sig === 'string') signature = fromBase64(sig);
           else throw new WalletSignMessageError('Unsupported signature format');
         } else {
           throw new WalletSignMessageError('Invalid signature response');
@@ -547,7 +540,7 @@ export class MorselCookieWalletAdapter extends EventEmitter<AdapterEvents> imple
       try {
         const id = generateRequestId();
         const result = await this.relaySession.sendRequest(
-          { type: 'sign_message', id, message: Buffer.from(message).toString('base64') },
+          { type: 'sign_message', id, message: toBase64(message) },
           60_000
         );
         return { signature: bs58.decode(result.signature) as unknown as Uint8Array };
