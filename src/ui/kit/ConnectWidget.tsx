@@ -986,16 +986,16 @@ function WidgetLayer(props: WalletModalProps & { closing: boolean; onExited: () 
         <div className="mw-get-art" aria-hidden="true">
           <span className="mw-get-ring" />
           <span className="mw-get-ring" />
-          <span className="mw-chip-float" style={{ left: '12%', top: 18, animationDelay: '-1.5s' }}>
+          <span className="mw-chip-float" style={{ left: '9%', top: 22, animationDelay: '-1.5s' }}>
             <i style={{ background: 'linear-gradient(135deg,#ffd27a,#e89b2c)' }} />
             COOK
           </span>
-          <span className="mw-chip-float" style={{ right: '12%', top: 62, animationDelay: '-3.5s' }}>
+          <span className="mw-chip-float" style={{ right: '9%', top: 78, animationDelay: '-3.5s' }}>
             <i style={{ background: 'linear-gradient(135deg,#9945ff,#14f195)' }} />
             SOL
           </span>
           <span className="mw-get-logo">
-            <img className="mw-logo-img" data-mw-shared={SHARED_MORSEL} src={MORSEL_LOGO_DATA_URI} alt="" width={76} height={76} draggable={false} />
+            <img className="mw-logo-img" data-mw-shared={SHARED_MORSEL} src={MORSEL_LOGO_DATA_URI} alt="" width={72} height={72} draggable={false} />
           </span>
         </div>
         <h3 className="mw-get-h">Morsel Wallet</h3>

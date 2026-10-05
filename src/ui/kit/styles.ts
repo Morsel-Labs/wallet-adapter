@@ -222,13 +222,13 @@ const css = (): string => {
 .mw-addr{margin-top:12px;display:inline-flex;align-items:center;gap:8px;height:34px;padding:0 12px 0 5px;border-radius:999px;background:var(--mw-bg-2);font-size:13px;font-weight:550;font-variant-numeric:tabular-nums}
 .mw-ava{border-radius:50%;flex-shrink:0;box-shadow:inset 0 0 0 1px rgba(0,0,0,.06)}
 
-.mw-get-art{position:relative;width:100%;height:116px;display:flex;align-items:center;justify-content:center;margin-top:-4px}
+.mw-get-art{position:relative;width:100%;height:136px;margin-bottom:10px;display:flex;align-items:center;justify-content:center;overflow:hidden}
 .mw-get-art::before{content:"";position:absolute;width:200px;height:120px;border-radius:50%;
   background:radial-gradient(closest-side,color-mix(in srgb,var(--mw-accent) 26%,transparent),transparent)}
-.mw-get-ring{position:absolute;width:104px;height:104px;border-radius:50%;border:1px solid color-mix(in srgb,var(--mw-accent) 22%,transparent)}
-.mw-get-ring+.mw-get-ring{width:150px;height:150px;opacity:.55}
-.mw-get-logo{position:relative;width:76px;height:76px;animation:mw-float 5s ease-in-out infinite}
-.mw-get-logo .mw-logo-img{width:76px;height:76px;filter:drop-shadow(0 10px 18px color-mix(in srgb,var(--mw-accent) 45%,transparent))}
+.mw-get-ring{position:absolute;width:98px;height:98px;border-radius:50%;border:1px solid color-mix(in srgb,var(--mw-accent) 22%,transparent)}
+.mw-get-ring+.mw-get-ring{width:128px;height:128px;opacity:.55}
+.mw-get-logo{position:relative;width:72px;height:72px;animation:mw-float 5s ease-in-out infinite}
+.mw-get-logo .mw-logo-img{width:72px;height:72px;filter:drop-shadow(0 10px 18px color-mix(in srgb,var(--mw-accent) 45%,transparent))}
 @keyframes mw-float{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
 .mw-chip-float{position:absolute;display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 9px 0 4px;border-radius:999px;font-size:11px;font-weight:600;
   background:var(--mw-bg);color:var(--mw-fg-2);box-shadow:var(--mw-pop-shadow);animation:mw-float 6s ease-in-out infinite}
