@@ -2,10 +2,10 @@ import { PublicKey, Transaction, VersionedTransaction, Connection, SendOptions, 
 import EventEmitter from 'eventemitter3';
 import nacl from 'tweetnacl';
 import bs58 from 'bs58';
-import { MorselCookieProvider, WalletReadyState, SignedMessageResponse } from './types';
+import { MorselCookieProvider, WalletReadyState, SignedMessageResponse, MorselRelayStatus } from './types';
 import { WalletAdapterError, WalletNotFoundError, WalletNotConnectedError, WalletConnectionError, WalletDisconnectionError, WalletSignTransactionError, WalletSignMessageError } from './errors';
-import { detectMorselCookieProvider } from './detect';
-import { MORSEL_COOKIE_WALLET_NAME, MORSEL_COOKIE_WALLET_URL, MORSEL_COOKIE_WALLET_ICON } from './constants';
+import { detectMorselCookieProvider, detectStandardMorselProvider } from './detect';
+import { MORSEL_COOKIE_WALLET_NAME, MORSEL_COOKIE_WALLET_URL, MORSEL_COOKIE_WALLET_ICON, morselBrowseLink } from './constants';
 import { CookieWalletAdapter } from './CookieWalletAdapter';
 
 const RELAY_BASE = 'wss://api.dumpsack.xyz';
@@ -58,6 +58,8 @@ type PendingRequest = {
 };
 
 type SessionCallbacks = {
+  onScanned: () => void;
+  onWalletLeft: () => void;
   onApprove: (walletAddress: string) => void;
   onReject: () => void;
   onClose: (wasConnected: boolean) => void;
@@ -95,8 +97,13 @@ class MorselRelaySession {
 
       if (msg.type === 'peer_disconnected' && msg.role === 'wallet') {
         if (this.connected) cb.onClose(true);
+        else if (this.walletPubKey) cb.onWalletLeft();
+
+      } else if (msg.type === 'peer_joined' && msg.role === 'wallet') {
+        cb.onScanned();
 
       } else if (msg.type === 'wallet_hello' && !this.walletPubKey) {
+        cb.onScanned();
         try {
           this.walletPubKey = fromBase64url(msg.pubkey);
           this.proposalId = generateRequestId();
@@ -199,7 +206,20 @@ type AdapterEvents = {
   error: (error: WalletAdapterError) => void;
   readyStateChange: (readyState: WalletReadyState) => void;
   wcUriChange: (uri: string) => void;
+  relayStatusChange: (status: MorselRelayStatus) => void;
 };
+
+// On a phone browser without Morsel's provider, "Connect" opens this very page inside Morsel
+// (like Phantom's browse links): Morsel's browser injects its provider and the site connects there.
+// Universal / App Link first; the page it lands on falls back to morsel:// and to installing Morsel.
+function openInMorselApp(): boolean {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent || '';
+  const mobile = /Android|iPhone|iPad|iPod/i.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+  if (!mobile) return false;
+  window.location.href = morselBrowseLink(window.location.href, window.location.origin);
+  return true;
+}
 
 
 export class MorselCookieWalletAdapter extends EventEmitter<AdapterEvents> implements CookieWalletAdapter {
@@ -211,7 +231,12 @@ export class MorselCookieWalletAdapter extends EventEmitter<AdapterEvents> imple
   connecting = false;
   readyState: WalletReadyState = 'NotDetected';
   supportedTransactionVersions: ReadonlySet<'legacy' | 0> = new Set(['legacy', 0]);
+  /** The live `morsel://connect` pairing URI shown as the QR. */
   wcUri = '';
+  /** When the current {@link wcUri} was minted (ms epoch). The relay keeps it for 5 minutes. */
+  wcUriCreatedAt = 0;
+  /** Where the QR / relay pairing stands; see {@link MorselRelayStatus}. */
+  relayStatus: MorselRelayStatus = 'idle';
 
   private provider: MorselCookieProvider | null = null;
   private connectPromise: Promise<void> | null = null;
@@ -232,14 +257,39 @@ export class MorselCookieWalletAdapter extends EventEmitter<AdapterEvents> imple
   }
 
 
+  private _setRelayStatus(status: MorselRelayStatus): void {
+    if (this.relayStatus === status) return;
+    this.relayStatus = status;
+    this.emit('relayStatusChange', status);
+  }
+
+  /**
+   * Mint a fresh pairing QR (new session id and keys). Use it to refresh an expired QR. A live
+   * relay connection is left alone.
+   */
+  restartRelaySession(): void {
+    if (typeof window === 'undefined' || this.relayConnected) return;
+    this._startRelaySession();
+  }
+
   private _startRelaySession(): void {
     this.relaySession?.end();
     const session = new MorselRelaySession();
     this.relaySession = session;
     this.wcUri = session.uri;
+    this.wcUriCreatedAt = Date.now();
     this.emit('wcUriChange', session.uri);
+    this._setRelayStatus('waiting');
 
     session.start({
+      onScanned: () => {
+        if (this.relaySession === session && !session.connected) this._setRelayStatus('scanned');
+      },
+      onWalletLeft: () => {
+        // The phone backed out before approving. That session already holds the wallet's key, so
+        // it cannot be paired again: mint a fresh QR.
+        if (this.relaySession === session) this._startRelaySession();
+      },
       onApprove: (walletAddress) => {
         try {
           const pk = new PublicKey(walletAddress);
@@ -250,11 +300,15 @@ export class MorselCookieWalletAdapter extends EventEmitter<AdapterEvents> imple
             this.readyState = 'Installed';
             this.emit('readyStateChange', this.readyState);
           }
+          this._setRelayStatus('connected');
           this.emit('connect', pk);
         } catch { /* ignore invalid address */ }
       },
       onReject: () => {
-        setTimeout(() => this._startRelaySession(), 500);
+        this._setRelayStatus('rejected');
+        setTimeout(() => {
+          if (this.relaySession === session) this._startRelaySession();
+        }, 500);
       },
       onClose: (wasConnected) => {
         this.relayConnected = false;
@@ -272,7 +326,9 @@ export class MorselCookieWalletAdapter extends EventEmitter<AdapterEvents> imple
 
 
   refreshProvider(): void {
-    const newProvider = detectMorselCookieProvider();
+    // Injected provider first (window.morsel / cookie / dumpsack, any shape); if the wallet only
+    // registered through the Wallet Standard, adapt that as the provider instead.
+    const newProvider = detectMorselCookieProvider() ?? detectStandardMorselProvider();
     const wasDetected = this.provider !== null;
     const isDetected = newProvider !== null;
     this.provider = newProvider;
@@ -330,6 +386,10 @@ export class MorselCookieWalletAdapter extends EventEmitter<AdapterEvents> imple
 
   private async _connectInjected(): Promise<void> {
     this.refreshProvider();
+    if (!this.provider && openInMorselApp()) {
+      // Handed off: the page reopens inside Morsel's browser, which connects on its own.
+      return new Promise<void>(() => { });
+    }
     if (!this.provider) {
       const error = new WalletNotFoundError();
       this.emit('error', error);
@@ -522,6 +582,7 @@ export class MorselCookieWalletAdapter extends EventEmitter<AdapterEvents> imple
     if (typeof window !== 'undefined') window.removeEventListener('accountChanged', this.windowAccountChangedListener);
     this.relaySession?.end();
     this.relaySession = null;
+    this.relayStatus = 'idle';
     this.provider = null;
     this.publicKey = null;
     this.connected = false;

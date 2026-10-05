@@ -26,6 +26,16 @@ export type WalletReadyState = 'Installed' | 'NotDetected' | 'Loadable' | 'Unsup
 
 export type WalletAdapterEvents = 'connect' | 'disconnect' | 'error' | 'readyStateChange';
 
+/**
+ * Where the QR / relay pairing with the Morsel mobile app stands.
+ *  - `idle`      no relay session (server side, or destroyed)
+ *  - `waiting`   QR is live, nobody has scanned it yet
+ *  - `scanned`   the phone scanned it and is showing the approval prompt
+ *  - `rejected`  the user declined in the app (a fresh session follows shortly)
+ *  - `connected` approved; the relay channel is live
+ */
+export type MorselRelayStatus = 'idle' | 'waiting' | 'scanned' | 'rejected' | 'connected';
+
 export interface SignedMessageResponse {
   signature: Uint8Array;
 }

@@ -4,7 +4,7 @@ export { StandardWalletAdapter } from './core/StandardWalletAdapter';
 export { COOKIE_CHAIN } from './core/chains';
 export * from './core/types';
 export * from './core/errors';
-export { detectMorselCookieProvider } from './core/detect';
+export { detectMorselCookieProvider, detectStandardMorselProvider } from './core/detect';
 export * from './core/constants';
 export type { CookieWalletAdapter } from './core/CookieWalletAdapter';
 
