@@ -245,8 +245,11 @@ export class MorselCookieWalletAdapter extends EventEmitter<AdapterEvents> imple
   constructor() {
     super();
     this.autoDetect();
-    this.refreshIntervalId = setInterval(() => this.refreshProvider(), 1000);
-    if (typeof window !== 'undefined') this._startRelaySession();
+    // Browser only: on the server (SSR) a timer per render would leak and keep Node alive.
+    if (typeof window !== 'undefined') {
+      this.refreshIntervalId = setInterval(() => this.refreshProvider(), 1000);
+      this._startRelaySession();
+    }
   }
 
 
