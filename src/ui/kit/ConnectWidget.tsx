@@ -762,7 +762,7 @@ function WidgetLayer(props: WalletModalProps & { closing: boolean; onExited: () 
           )}
           <div className="mw-list">
             {shown.map(({ a, i: idx }) => (
-              <WalletRow key={idx} adapter={a} index={idx} order={i++} {...rowProps} />
+              <WalletRow key={idx} adapter={a} index={idx} order={i++} compact {...rowProps} />
             ))}
             {hidden.length > 0 && (
               <button type="button" className="mw-row mw-row-more mw-stagger" style={{ ['--i' as string]: i++ }} onClick={() => go({ name: 'more' })} data-mw-nav="" aria-label={`More wallets (${hidden.length})`}>
@@ -1034,7 +1034,7 @@ function WidgetLayer(props: WalletModalProps & { closing: boolean; onExited: () 
               <QrCode value={links.install} size={92} ecc="M" label="QR code to download Morsel" />
             </div>
             <div className="mw-dl-side">
-              <p>Scan with your phone, or pick a platform.</p>
+              <p>Scan with your phone camera</p>
               <a className="mw-store" href={links.ios} target="_blank" rel="noopener noreferrer">
                 <AppleGlyph size={15} /> iOS <small>iPhone</small>
               </a>
@@ -1063,7 +1063,15 @@ interface RowShared {
   installLabel: string;
 }
 
-function WalletRow({ adapter, index, order, activeIndex, onWallet, installLabel }: { adapter: CookieWalletAdapter; index: number; order: number } & RowShared) {
+function WalletRow({
+  adapter,
+  index,
+  order,
+  activeIndex,
+  onWallet,
+  installLabel,
+  compact,
+}: { adapter: CookieWalletAdapter; index: number; order: number; compact?: boolean } & RowShared) {
   const installed = adapter.readyState === 'Installed';
   return (
     <button type="button" className="mw-row mw-stagger" style={{ ['--i' as string]: order }} onClick={() => onWallet(index)} data-mw-nav="">
@@ -1076,7 +1084,7 @@ function WalletRow({ adapter, index, order, activeIndex, onWallet, installLabel 
             Connected
           </>
         ) : installed ? (
-          'Detected'
+          compact ? <ChevronRight size={16} className="mw-chev" /> : 'Detected'
         ) : (
           <>
             {installLabel} <ExternalIcon size={13} />

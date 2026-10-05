@@ -275,6 +275,7 @@ const css = (): string => {
 .mw-chip-wallet img{width:100%;height:100%;border-radius:4px;object-fit:contain}
 .mw-chip-bal{padding-left:8px;margin-left:1px;border-left:1px solid var(--mw-line);color:var(--mw-fg-2);font-weight:550}
 .mw-chip.mw-sm{height:34px}
+@media (max-width:480px){.mw-chip-bal{display:none}}
 .mw-chip.mw-sm .mw-chip-ava,.mw-chip.mw-sm .mw-chip-ava .mw-ava{width:24px;height:24px}
 
 .mw-menu{position:fixed;z-index:var(--mw-z,2147483000);width:288px;max-width:calc(100vw - 24px);padding:6px;border-radius:20px;
