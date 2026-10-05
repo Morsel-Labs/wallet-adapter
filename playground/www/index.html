@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Morsel connect playground</title>
+    <style>
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; }
+      body { font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; }
+      .demo { min-height: 100vh; transition: background-color .2s; }
+      .demo-light { background: #f4f5f8; color: #12151c; }
+      .demo-dark { background: #0b0d12; color: #e8ebf1; }
+      .demo-light { --d-card: #fff; --d-line: #e6e8ee; --d-muted: #7a8192; --d-field: #f4f5f8; }
+      .demo-dark { --d-card: #13161d; --d-line: #222630; --d-muted: #7d8494; --d-field: #0e1016; }
+      .demo-head { display: flex; align-items: center; gap: 24px; height: 72px; padding: 0 28px; border-bottom: 1px solid var(--d-line); }
+      .demo-brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 16px; letter-spacing: -.01em; }
+      .demo-mark { width: 26px; height: 26px; border-radius: 8px; background: conic-gradient(from 210deg, #7c5cff, #29c6ff, #7c5cff); }
+      .demo-nav { display: flex; gap: 6px; flex: 1; }
+      .demo-nav a { padding: 8px 12px; border-radius: 10px; font-size: 14px; font-weight: 550; color: var(--d-muted); cursor: default; }
+      .demo-nav a[aria-current] { color: inherit; background: var(--d-card); }
+      .demo-cta { display: flex; align-items: center; }
+      .demo-main { display: flex; justify-content: center; padding: 72px 16px; }
+      .demo-card { width: 440px; max-width: 100%; background: var(--d-card); border: 1px solid var(--d-line); border-radius: 24px; padding: 16px; }
+      .demo-card-head { display: flex; justify-content: space-between; align-items: center; padding: 4px 6px 12px; }
+      .demo-card-head span { font-size: 12px; color: var(--d-muted); }
+      .demo-field { background: var(--d-field); border-radius: 18px; padding: 14px 16px; margin-bottom: 6px; }
+      .demo-field small { color: var(--d-muted); font-size: 12.5px; }
+      .demo-field > div { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; }
+      .demo-amt { font-size: 30px; font-weight: 600; letter-spacing: -.02em; }
+      .demo-amt.muted { color: var(--d-muted); }
+      .demo-token { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px 6px 6px; border-radius: 999px; background: var(--d-card); border: 1px solid var(--d-line); font-weight: 600; font-size: 14px; }
+      .demo-token i { width: 24px; height: 24px; border-radius: 50%; display: block; }
+      .demo-go { width: 100%; height: 54px; margin-top: 10px; border: 0; border-radius: 16px; font: inherit; font-weight: 650; font-size: 16px; background: #1b1f29; color: #fff; cursor: pointer; }
+      .demo-dark .demo-go { background: #e8ebf1; color: #0b0d12; }
+      .ctl { position: fixed; left: 12px; bottom: 12px; z-index: 10; width: 360px; padding: 10px 12px; border-radius: 14px; background: rgba(20,22,28,.92); color: #e8ebf1; font-size: 12px; display: flex; flex-direction: column; gap: 6px; }
+      .ctl button { font: inherit; font-size: 11.5px; padding: 3px 7px; margin: 1px; border-radius: 6px; border: 1px solid #3a3f4b; background: #22262f; color: #e8ebf1; cursor: pointer; }
+      .ctl button[aria-pressed=true] { background: #0b63f6; border-color: #0b63f6; }
+      @media (max-width: 640px) {
+        .demo-head { padding: 0 16px; height: 64px; }
+        .demo-nav { display: none; }
+        .demo-brand { flex: 1; }
+        .demo-main { padding: 28px 16px; }
+        .ctl { display: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
