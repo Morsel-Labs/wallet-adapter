@@ -1,14 +1,27 @@
-﻿import React, { useCallback } from 'react';
+import React, { useCallback } from 'react';
 import { useWalletConnection } from '../react';
 import { useWalletAddress } from '../react';
 import { useOptionalWalletModal } from './WalletModalProvider';
 import { ConnectButtonProps } from './types';
+import { AccountButton } from './kit/AccountButton';
 
 function shortenAddress(address: string): string {
   return `${address.slice(0, 4)}...${address.slice(-4)}`;
 }
 
-export function ConnectButton({
+/**
+ * Connect button.
+ *
+ * Without `className` / `children` it is the styled Morsel button: an accent pill that opens the
+ * connect widget, then a compact account chip with a Copy / Switch wallet / Disconnect menu.
+ * With `className` or `children` it is the original unstyled button, unchanged.
+ */
+export function ConnectButton(props: ConnectButtonProps) {
+  if (props.className !== undefined || props.children !== undefined) return <UnstyledConnectButton {...props} />;
+  return <AccountButton {...props} />;
+}
+
+function UnstyledConnectButton({
   children,
   className,
   disabled = false,
@@ -20,7 +33,7 @@ export function ConnectButton({
   onConnectError,
   onDisconnectError,
 }: ConnectButtonProps) {
-  const { connect, disconnect, connected, connecting, disconnecting, pending } = useWalletConnection();
+  const { connect, disconnect, connected, connecting, pending } = useWalletConnection();
   const address = useWalletAddress();
   const modal = useOptionalWalletModal();
 
@@ -46,38 +59,14 @@ export function ConnectButton({
   if (pending && connecting) {
     label = connectingLabel;
   } else if (connected) {
-    if (showAddress && address) {
-      label = shortenAddress(address);
-    } else {
-      label = connectedLabel;
-    }
+    label = showAddress && address ? shortenAddress(address) : connectedLabel;
   } else {
     label = disconnectedLabel;
   }
 
-  const isDisabled = disabled || pending;
-
-  if (children) {
-    return (
-      <button
-        type="button"
-        className={className}
-        disabled={isDisabled}
-        onClick={handleClick}
-      >
-        {children}
-      </button>
-    );
-  }
-
   return (
-    <button
-      type="button"
-      className={className}
-      disabled={isDisabled}
-      onClick={handleClick}
-    >
-      {label}
+    <button type="button" className={className} disabled={disabled || pending} onClick={handleClick}>
+      {children ?? label}
     </button>
   );
 }

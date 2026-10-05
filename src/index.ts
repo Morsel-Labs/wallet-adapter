@@ -20,5 +20,7 @@ export * from './react/hooks';
 export { ConnectButton } from './ui/ConnectButton';
 export { WalletModal } from './ui/WalletModal';
 export { WalletModalProvider, useWalletModal, useOptionalWalletModal } from './ui/WalletModalProvider';
+export type { WalletModalContextState, WalletModalOpenOptions, WalletModalView } from './ui/WalletModalProvider';
+export { getMorselConnectCss } from './ui/kit/styles';
 export * from './ui/types';
 export * from './ui/modalTypes';

@@ -3,3 +3,6 @@ dist/
 *.tsbuildinfo
 .env
 .env.*
+playground/www/app.js
+playground/www/app.js.map
+.tmp/
