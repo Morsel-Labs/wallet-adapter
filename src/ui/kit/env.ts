@@ -120,7 +120,7 @@ export async function copyText(text: string): Promise<boolean> {
   }
 }
 
-/** Deterministic, pleasant gradient avatar for an address. CSS only, no network. */
+/** Deterministic, soft gradient avatar for an address. CSS only, no network. */
 export function avatarBackground(seed: string): string {
   let h = 2166136261;
   for (let i = 0; i < seed.length; i++) {
@@ -135,8 +135,8 @@ export function avatarBackground(seed: string): string {
   const px = 20 + ((u >>> 12) % 60);
   const py = 15 + ((u >>> 20) % 50);
   return (
-    `radial-gradient(circle at ${px}% ${py}%, hsl(${h3} 95% 78% / .95), transparent 55%),` +
-    `linear-gradient(${ang}deg, hsl(${h1} 85% 58%), hsl(${h2} 80% 48%))`
+    `radial-gradient(circle at ${px}% ${py}%, hsl(${h3} 70% 86% / .8), transparent 60%),` +
+    `linear-gradient(${ang}deg, hsl(${h1} 55% 68%), hsl(${h2} 50% 56%))`
   );
 }
 

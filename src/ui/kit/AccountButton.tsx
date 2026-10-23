@@ -252,16 +252,17 @@ function AccountMenu(p: MenuProps) {
     >
       <div className="mw-menu-head">
         <span className="mw-menu-ava">
-          <Avatar address={p.address} size={56} />
+          <Avatar address={p.address} size={40} />
           {p.walletIconSrc && (
             <span className="mw-chip-wallet">
-              <img src={p.walletIconSrc} alt="" width={18} height={18} />
+              <img src={p.walletIconSrc} alt="" width={14} height={14} />
             </span>
           )}
         </span>
-        <span className="mw-menu-addr">{shortAddress(p.address, 5, 5)}</span>
-        {p.balanceText && <span className="mw-menu-bal">{p.balanceText}</span>}
-        {p.walletName && <span className="mw-menu-via">Connected with {p.walletName}</span>}
+        <span className="mw-menu-id">
+          <span className="mw-menu-addr">{shortAddress(p.address)}</span>
+          <span className="mw-menu-meta">{[p.balanceText, p.walletName].filter(Boolean).join(' · ')}</span>
+        </span>
       </div>
       <div className="mw-menu-sep" />
       <button type="button" role="menuitem" className="mw-item" onClick={onCopy}>

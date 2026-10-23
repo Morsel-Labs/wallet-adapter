@@ -28,20 +28,15 @@ import {
   AlertIcon,
   AppleGlyph,
   BackIcon,
-  BoltIcon,
   CheckIcon,
   ChevronRight,
   ChromeGlyph,
   CloseIcon,
-  CompassIcon,
   ExternalIcon,
   LockIcon,
   PhoneIcon,
   PlayGlyph,
-  PuzzleIcon,
-  RefreshIcon,
   SearchIcon,
-  ShieldIcon,
   WalletIcon,
 } from './icons';
 
@@ -626,28 +621,37 @@ function WidgetLayer(props: WalletModalProps & { closing: boolean; onExited: () 
   const viewWalletName = viewWallet ? displayWalletName(viewWallet.name) : morselName;
   const viewWalletIsMorsel = !viewWallet || isMorselAdapterName(viewWallet.name);
 
+  // List screens show their title in the header. Status screens (QR, approve, connected, errors)
+  // already say it in their one heading, so there the header title is for screen readers only.
   let title: string;
+  let quietTitle = true;
   switch (view.name) {
     case 'picker':
       title = props.title ?? 'Connect a wallet';
+      quietTitle = false;
       break;
     case 'more':
       title = 'More wallets';
+      quietTitle = false;
+      break;
+    case 'get':
+      title = 'Get Morsel';
+      quietTitle = false;
       break;
     case 'qr':
-      title = 'Connect Morsel';
+      title = 'Scan with the Morsel app';
       break;
     case 'connected':
       title = 'Connected';
       break;
-    case 'get':
-      title = 'Get Morsel';
-      break;
     case 'open-in-app':
-      title = morselName;
+      title = `Continue in ${morselName}`;
+      break;
+    case 'error':
+      title = view.reason === 'rejected' ? 'Request declined' : "Couldn't connect";
       break;
     default:
-      title = viewWalletName;
+      title = view.via === 'relay' ? 'Approve on your phone' : `Approve in ${viewWalletName}`;
   }
   const canBack = stack.length > 1 && view.name !== 'connected';
   const dappLogo =
@@ -694,7 +698,7 @@ function WidgetLayer(props: WalletModalProps & { closing: boolean; onExited: () 
                   <span style={{ display: 'flex', padding: 7 }}>{dappLogo}</span>
                 ) : null}
               </div>
-              <h2 className="mw-title" id={titleId}>
+              <h2 className={quietTitle ? 'mw-title mw-sr' : 'mw-title'} id={titleId}>
                 <span key={title} style={{ animation: 'mw-fade .22s both' }}>
                   {title}
                 </span>
@@ -738,12 +742,10 @@ function WidgetLayer(props: WalletModalProps & { closing: boolean; onExited: () 
         <div className="mw-scroll">
           <button type="button" className="mw-hero mw-stagger" style={{ ['--i' as string]: i++ }} onClick={onMorsel} data-mw-nav="">
             <span className="mw-hero-logo">
-              <img className="mw-logo-img" data-mw-shared={SHARED_MORSEL} src={MORSEL_LOGO_DATA_URI} alt="" width={44} height={44} draggable={false} />
+              <img className="mw-logo-img" data-mw-shared={SHARED_MORSEL} src={MORSEL_LOGO_DATA_URI} alt="" width={40} height={40} draggable={false} />
             </span>
             <span className="mw-hero-text">
-              <span className="mw-hero-name">
-                Morsel <span className="mw-tag">Recommended</span>
-              </span>
+              <span className="mw-hero-name">Morsel</span>
               <span className="mw-hero-sub">Built for Cookie Chain</span>
             </span>
             {morselConnected ? (
@@ -762,7 +764,7 @@ function WidgetLayer(props: WalletModalProps & { closing: boolean; onExited: () 
           )}
           <div className="mw-list">
             {shown.map(({ a, i: idx }) => (
-              <WalletRow key={idx} adapter={a} index={idx} order={i++} compact {...rowProps} />
+              <WalletRow key={idx} adapter={a} index={idx} order={i++} {...rowProps} />
             ))}
             {hidden.length > 0 && (
               <button type="button" className="mw-row mw-row-more mw-stagger" style={{ ['--i' as string]: i++ }} onClick={() => go({ name: 'more' })} data-mw-nav="" aria-label={`More wallets (${hidden.length})`}>
@@ -770,11 +772,6 @@ function WidgetLayer(props: WalletModalProps & { closing: boolean; onExited: () 
                   <WalletIcon size={18} />
                 </span>
                 <span className="mw-row-name">More wallets</span>
-                <span className="mw-stack" aria-hidden="true">
-                  {hidden.slice(0, 3).map(({ a, i: idx }) => (
-                    <img key={idx} src={walletIcon(a)} alt="" width={20} height={20} />
-                  ))}
-                </span>
                 <ChevronRight size={16} className="mw-chev" />
               </button>
             )}
@@ -794,50 +791,36 @@ function WidgetLayer(props: WalletModalProps & { closing: boolean; onExited: () 
   function renderQr() {
     const mins = Math.floor(remaining / 60000);
     const secs = String(Math.floor((remaining % 60000) / 1000)).padStart(2, '0');
+    // No clock until the last minute: a countdown is noise while there is plenty of time.
+    const ending = !expired && remaining < 60000;
     return (
       <div className="mw-qr-wrap">
-        <div className="mw-qr-frame" data-live={!!qr.uri && !expired} data-expired={expired}>
+        <div className="mw-qr-frame" data-expired={expired}>
           {qr.uri ? (
-            <QrCode value={qr.uri} size={sheet ? 220 : 236} logo={MORSEL_LOGO_DATA_URI} logoShared={SHARED_MORSEL} label="Morsel connection QR code" />
+            <QrCode value={qr.uri} size={sheet ? 216 : 228} logo={MORSEL_LOGO_DATA_URI} logoShared={SHARED_MORSEL} label="Morsel connection QR code" />
           ) : (
-            <div className="mw-qr-skel" style={{ width: sheet ? 220 : 236, height: sheet ? 220 : 236 }} />
+            <div className="mw-qr-skel" style={{ width: sheet ? 216 : 228, height: sheet ? 216 : 228 }} />
           )}
           {expired && (
             <div className="mw-qr-over">
-              <strong>QR code expired</strong>
+              <strong>Code expired</strong>
               <button type="button" className="mw-btn mw-btn-primary" onClick={refreshQr} data-mw-autofocus="">
-                <RefreshIcon size={16} /> Refresh
+                New code
               </button>
             </div>
           )}
         </div>
-        <p className="mw-qr-title">Scan with the Morsel app</p>
-        <p className="mw-qr-text">Open Morsel on your phone and scan this code to connect.</p>
-        <div className="mw-status" role="status" aria-live="polite" data-tone={!expired && remaining < 30000 ? 'warn' : undefined}>
-          {expired ? (
-            <>
-              <span className="mw-dot mw-dot-warn" aria-hidden="true" /> QR code expired
-            </>
-          ) : (
-            <>
-              <span className="mw-pulse" aria-hidden="true" />
-              Waiting for approval
-              <span className="mw-sep" aria-hidden="true" />
-              <span className="mw-timer" aria-label={`Expires in ${mins} minutes ${secs} seconds`}>
-                {mins}:{secs}
-              </span>
-            </>
-          )}
-          <button type="button" className="mw-iconbtn mw-sm" onClick={refreshQr} aria-label="New QR code" title="New QR code">
-            <RefreshIcon size={14} />
-          </button>
-        </div>
-        <div className="mw-qr-actions mw-row2">
-          <a className="mw-btn mw-btn-ghost" href={links.extension} target="_blank" rel="noopener noreferrer">
-            <PuzzleIcon size={16} /> Get the extension
-          </a>
-          <button type="button" className="mw-btn mw-btn-ghost" onClick={() => go({ name: 'get' })}>
-            <PhoneIcon size={16} /> Get the app
+        <h3 className="mw-h">Scan with the Morsel app</h3>
+        <p className="mw-status" data-tone={ending ? 'warn' : undefined} aria-hidden="true">
+          {expired ? 'Code expired' : ending ? `Expires in ${mins}:${secs}` : 'Waiting for scan'}
+        </p>
+        <span className="mw-sr" role="status">
+          {expired ? 'The QR code expired' : ending ? 'The QR code expires in under a minute' : 'Waiting for you to scan the code'}
+        </span>
+        <div className="mw-foot">
+          New to Morsel?
+          <button type="button" className="mw-link" onClick={() => go({ name: 'get' })}>
+            Get the app
           </button>
         </div>
       </div>
@@ -872,24 +855,19 @@ function WidgetLayer(props: WalletModalProps & { closing: boolean; onExited: () 
       <div className="mw-center">
         {walletVisual(v.index, relay ? <span className="mw-badge mw-badge-info"><PhoneIcon size={15} /></span> : undefined, true)}
         <h3 className="mw-h">{relay ? 'Approve on your phone' : `Approve in ${name}`}</h3>
-        <p className="mw-p">
-          {relay
-            ? 'Morsel is asking you to approve this connection. Confirm it in the app to continue.'
-            : `Confirm the connection in ${name} to continue.`}
-        </p>
         {host && (
           <span className="mw-origin">
             <LockIcon size={13} />
             <span>{host}</span>
           </span>
         )}
-        <div className="mw-actions">
-          {viewWalletIsMorsel && !relay && !mobile ? (
+        {viewWalletIsMorsel && !relay && !mobile ? (
+          <div className="mw-actions">
             <button type="button" className="mw-btn mw-btn-ghost" onClick={() => openQr('replace')}>
-              <PhoneIcon size={16} /> Use the Morsel app instead
+              Use the Morsel app instead
             </button>
-          ) : null}
-        </div>
+          </div>
+        ) : null}
         <span className="mw-sr" role="status">
           {relay ? 'Waiting for approval on your phone' : `Waiting for approval in ${name}`}
         </span>
@@ -903,15 +881,12 @@ function WidgetLayer(props: WalletModalProps & { closing: boolean; onExited: () 
       <div className="mw-center">
         {walletVisual(
           activeAdapterIndex,
-          <>
-            <span className="mw-burst" />
-            <span className="mw-badge mw-badge-ok">
-              <CheckIcon size={16} strokeWidth={2.6} />
-            </span>
-          </>
+          <span className="mw-badge mw-badge-ok">
+            <CheckIcon size={15} strokeWidth={2.6} />
+          </span>
         )}
         <h3 className="mw-h" role="status">
-          You're connected
+          Connected
         </h3>
         {addr && (
           <span className="mw-addr">
@@ -928,21 +903,17 @@ function WidgetLayer(props: WalletModalProps & { closing: boolean; onExited: () 
     const rejected = v.reason === 'rejected';
     return (
       <div className="mw-center">
-        <div className="mw-shake">
-          {walletVisual(
-            v.index,
-            <span className="mw-badge mw-badge-bad">{rejected ? <CloseIcon size={15} strokeWidth={2.6} /> : <AlertIcon size={16} />}</span>
-          )}
-        </div>
+        {walletVisual(
+          v.index,
+          <span className="mw-badge mw-badge-bad">{rejected ? <CloseIcon size={14} strokeWidth={2.6} /> : <AlertIcon size={15} />}</span>
+        )}
         <h3 className="mw-h" role="alert">
           {rejected ? 'Request declined' : "Couldn't connect"}
         </h3>
-        <p className="mw-p">
-          {rejected ? `The connection was declined in ${name}. Try again whenever you're ready.` : v.message || `Something went wrong talking to ${name}.`}
-        </p>
+        {!rejected && <p className="mw-p">{v.message || `Something went wrong talking to ${name}.`}</p>}
         <div className="mw-actions">
           <button type="button" className="mw-btn mw-btn-primary mw-btn-block" onClick={retry} data-mw-autofocus="">
-            <RefreshIcon size={16} /> Try again
+            Try again
           </button>
           <button type="button" className="mw-btn mw-btn-ghost" onClick={() => go({ name: 'picker' }, 'reset')}>
             Choose another wallet
@@ -959,10 +930,10 @@ function WidgetLayer(props: WalletModalProps & { closing: boolean; onExited: () 
     return (
       <div className="mw-center">
         <div className="mw-orbit">
-          <img className="mw-logo-img" data-mw-shared={SHARED_MORSEL} src={MORSEL_LOGO_DATA_URI} alt="" width={72} height={72} draggable={false} style={{ width: 72, height: 72 }} />
+          <img className="mw-logo-img" data-mw-shared={SHARED_MORSEL} src={MORSEL_LOGO_DATA_URI} alt="" width={64} height={64} draggable={false} />
         </div>
         <h3 className="mw-h">Continue in Morsel</h3>
-        <p className="mw-p">This site opens in the Morsel app, where your wallet connects in one tap. Your keys never leave your phone.</p>
+        <p className="mw-p">This page opens in Morsel, where you connect in one tap.</p>
         <div className="mw-actions">
           <a className="mw-btn mw-btn-primary mw-btn-lg mw-btn-block" href={href} data-mw-autofocus="">
             Open in Morsel
@@ -976,80 +947,45 @@ function WidgetLayer(props: WalletModalProps & { closing: boolean; onExited: () 
   }
 
   function renderGet() {
-    const props3 = [
-      { icon: <ShieldIcon size={17} />, t: 'Your keys, your crypto', s: 'Self-custody. No email, no sign-up.' },
-      { icon: <BoltIcon size={17} />, t: 'Trade, bridge and earn', s: 'Cookie Chain and Solana in one app.' },
-      { icon: <CompassIcon size={17} />, t: 'Open any app', s: 'A built-in browser, already connected.' },
-    ];
+    const apple = { href: links.ios, icon: <AppleGlyph size={16} />, label: 'iPhone' };
+    const play = { href: links.android, icon: <PlayGlyph size={14} />, label: 'Android' };
+    const [mine, other] = ios ? [apple, play] : [play, apple];
     return (
       <>
-        <div className="mw-get-art" aria-hidden="true">
-          <span className="mw-get-ring" />
-          <span className="mw-get-ring" />
-          <span className="mw-chip-float" style={{ left: '9%', top: 22, animationDelay: '-1.5s' }}>
-            <i style={{ background: 'linear-gradient(135deg,#ffd27a,#e89b2c)' }} />
-            COOK
-          </span>
-          <span className="mw-chip-float" style={{ right: '9%', top: 78, animationDelay: '-3.5s' }}>
-            <i style={{ background: 'linear-gradient(135deg,#9945ff,#14f195)' }} />
-            SOL
-          </span>
-          <span className="mw-get-logo">
-            <img className="mw-logo-img" data-mw-shared={SHARED_MORSEL} src={MORSEL_LOGO_DATA_URI} alt="" width={72} height={72} draggable={false} />
-          </span>
+        <div className="mw-center mw-get-head">
+          <img className="mw-logo-img mw-get-logo" data-mw-shared={SHARED_MORSEL} src={MORSEL_LOGO_DATA_URI} alt="" width={56} height={56} draggable={false} />
+          <h3 className="mw-h">Morsel Wallet</h3>
+          <p className="mw-p">Self-custody for Cookie Chain and Solana. No email, no sign-up.</p>
         </div>
-        <h3 className="mw-get-h">Morsel Wallet</h3>
-        <p className="mw-get-p">The self-custody wallet built for Cookie Chain, with Solana on board.</p>
-        <ul className="mw-props">
-          {props3.map((p, n) => (
-            <li key={p.t} className="mw-prop mw-stagger" style={{ ['--i' as string]: n + 1 }}>
-              <span className="mw-prop-ico">{p.icon}</span>
-              <span>
-                <b>{p.t}</b>
-                <small>{p.s}</small>
-              </span>
-            </li>
-          ))}
-        </ul>
         {mobile ? (
-          <div className="mw-stores mw-stagger" style={{ ['--i' as string]: 4 }}>
-            {(ios
-              ? [
-                  { href: links.ios, icon: <AppleGlyph size={17} />, label: 'iOS' },
-                  { href: links.android, icon: <PlayGlyph size={16} />, label: 'Android' },
-                ]
-              : [
-                  { href: links.android, icon: <PlayGlyph size={16} />, label: 'Android' },
-                  { href: links.ios, icon: <AppleGlyph size={17} />, label: 'iOS' },
-                ]
-            ).map((s) => (
-              <a key={s.label} className="mw-store" href={s.href} target="_blank" rel="noopener noreferrer">
-                {s.icon} Get for {s.label}
-              </a>
-            ))}
+          <div className="mw-actions mw-stagger" style={{ ['--i' as string]: 1 }}>
+            <a className="mw-btn mw-btn-primary mw-btn-lg mw-btn-block" href={mine.href} target="_blank" rel="noopener noreferrer" data-mw-autofocus="">
+              {mine.icon} Get Morsel for {mine.label}
+            </a>
+            <a className="mw-btn mw-btn-ghost" href={other.href} target="_blank" rel="noopener noreferrer">
+              Also on {other.label}
+            </a>
           </div>
         ) : (
-          <div className="mw-dl mw-stagger" style={{ ['--i' as string]: 4 }}>
+          <div className="mw-dl mw-stagger" style={{ ['--i' as string]: 1 }}>
             <div className="mw-dl-qr">
-              <QrCode value={links.install} size={92} ecc="M" label="QR code to download Morsel" />
+              <QrCode value={links.install} size={88} ecc="M" label="QR code to download Morsel" />
             </div>
             <div className="mw-dl-side">
-              <p>Scan with your phone camera</p>
-              <a className="mw-store" href={links.ios} target="_blank" rel="noopener noreferrer">
-                <AppleGlyph size={15} /> iOS <small>iPhone</small>
-              </a>
-              <a className="mw-store" href={links.android} target="_blank" rel="noopener noreferrer">
-                <PlayGlyph size={14} /> Android <small>Phone</small>
-              </a>
-              <a className="mw-store" href={links.extension} target="_blank" rel="noopener noreferrer">
-                <ChromeGlyph size={14} /> Chrome <small>Extension</small>
-              </a>
+              <p>Scan to download</p>
+              {[apple, play, { href: links.extension, icon: <ChromeGlyph size={14} />, label: 'Chrome extension' }].map((s) => (
+                <a key={s.label} className="mw-store" href={s.href} target="_blank" rel="noopener noreferrer">
+                  {s.icon}
+                  <span>{s.label}</span>
+                  <ExternalIcon size={12} />
+                </a>
+              ))}
             </div>
           </div>
         )}
-        <div className="mw-more-link">
-          <a className="mw-btn mw-btn-ghost" href={links.website} target="_blank" rel="noopener noreferrer">
-            Learn more at morselwallet.app <ExternalIcon size={13} />
+        <div className="mw-foot">
+          <a className="mw-link mw-link-quiet" href={links.website} target="_blank" rel="noopener noreferrer">
+            morselwallet.app
           </a>
         </div>
       </>
@@ -1070,8 +1006,7 @@ function WalletRow({
   activeIndex,
   onWallet,
   installLabel,
-  compact,
-}: { adapter: CookieWalletAdapter; index: number; order: number; compact?: boolean } & RowShared) {
+}: { adapter: CookieWalletAdapter; index: number; order: number } & RowShared) {
   const installed = adapter.readyState === 'Installed';
   return (
     <button type="button" className="mw-row mw-stagger" style={{ ['--i' as string]: order }} onClick={() => onWallet(index)} data-mw-nav="">
@@ -1083,9 +1018,7 @@ function WalletRow({
             <span className="mw-dot" />
             Connected
           </>
-        ) : installed ? (
-          compact ? <ChevronRight size={16} className="mw-chev" /> : 'Detected'
-        ) : (
+        ) : installed ? null : (
           <>
             {installLabel} <ExternalIcon size={13} />
           </>

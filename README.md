@@ -51,14 +51,17 @@ the user is:
 | Where | What happens when they pick Morsel |
 |---|---|
 | Desktop, Morsel extension installed | Connects through the extension: "Approve in Morsel". |
-| Desktop, no extension | A branded QR to scan with the Morsel app, with a live "Waiting for approval" status, a 5-minute expiry and refresh. As soon as the phone scans it the widget switches to "Approve on your phone". Links to get the extension or the app. |
+| Desktop, no extension | A branded QR to scan with the Morsel app. The code lasts 5 minutes; the countdown only shows in the last minute, and an expired code gets a new one in one tap. As soon as the phone scans it the widget switches to "Approve on your phone". |
 | Phone browser | "Continue in Morsel": opens the page inside Morsel's browser through a universal link, where it connects in one tap. |
 | Inside Morsel's browser | No list at all: it connects straight away. |
 
 Other installed wallets are listed under Morsel ("Detected"); wallets that are not installed sit
 behind "More wallets". Declined requests, errors and expired QR codes each get their own screen with
-a retry. "New to Morsel? Get the app" opens a short Get Morsel card (value props, platform links and,
-on desktop, a download QR).
+a retry. "New to Morsel? Get the app" opens a short Get Morsel card (platform links and, on desktop,
+a download QR).
+
+The design is deliberately quiet: one accent action per screen, status screens with a single
+heading, and nothing that loops except loading indicators.
 
 ### WalletModal props
 
@@ -131,7 +134,7 @@ global `button` / `img` rules do not leak in. The stylesheet is injected once in
 .mw-scope {
   --mw-accent: #ff6b00;
   --mw-radius: 20px;
-  --mw-font: 'Inter', system-ui, sans-serif;
+  --mw-font: inherit; /* use your page's typeface (the default is the system UI font) */
 }
 .mw-scope[data-mw-theme='dark'] {
   --mw-bg: #0b0b0f;
