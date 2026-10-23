@@ -3,6 +3,17 @@
   "version": "0.2.0",
   "type": "module",
   "description": "Wallet adapter for Morsel / Cookie Chain: core, React hooks, and the Morsel connect widget",
+  "homepage": "https://connect.morselwallet.app",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Morsel-Labs/wallet-adapter.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Morsel-Labs/wallet-adapter/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc && node scripts/fix-extensions.mjs",
     "prepare": "npm run build",
