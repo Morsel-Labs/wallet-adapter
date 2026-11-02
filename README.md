@@ -155,6 +155,46 @@ Tokens: `--mw-accent`, `--mw-accent-fg`, `--mw-bg`, `--mw-bg-2`, `--mw-bg-3`, `-
   wallet list, focus returned to the button on close, and live regions for status changes.
 - SSR: nothing touches `window` during render; the widget mounts on the client through a portal.
 
+## Morsel Pay
+
+Take payments in USDC, USDT, SOL or COOK, paid straight from the customer's wallet to yours (Morsel's
+fee rides in the same transaction; Morsel never holds the money).
+
+1. On your server, create a checkout with your secret key:
+
+```bash
+curl https://api.dumpsack.xyz/v1/pay/checkout/sessions \
+  -H "Authorization: Bearer sk_live_…" -H "Content-Type: application/json" \
+  -d '{"amount":"30","token":"USDC","description":"Gold, 1 month","success_url":"https://shop.example/thanks"}'
+# → { "id": "cs_…", "url": "https://morselwallet.app/checkout/cs_…", … }
+```
+
+2. In the page, the button (or the function):
+
+```tsx
+import { MorselPay } from '@morsel-wallet/adapter';
+
+<MorselPay
+  checkout={() => fetch('/api/checkout', { method: 'POST' }).then((r) => r.json()).then((j) => j.id)}
+  onPaid={(r) => console.log('paid', r.signature)}
+  onError={(e) => console.warn(e.code, e.message)}
+/>
+```
+
+```ts
+import { morselPay } from '@morsel-wallet/adapter/core';
+
+const result = await morselPay({ checkout: 'cs_…', wallet /* optional, any Solana wallet adapter */ });
+```
+
+With a wallet connected the customer approves one transaction right in your page (Morsel shows its
+simulation and Morsel Guard first); without one the hosted checkout opens in a popup (Pay with Morsel, or
+any Solana wallet by QR). The promise resolves once Morsel has seen the payment on chain, never because a
+wallet said it sent something. Errors carry a `code`: `expired`, `closed`, `rejected`, `not_found`,
+`aborted`, `timeout`, `network`. `useMorselPay()` gives the same with `status` for your own UI.
+
+Your server learns it too, from the signed `checkout.session.completed` webhook: trust that, not the page.
+
 ## Morsel adapter (core)
 
 ```ts

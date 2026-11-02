@@ -11,3 +11,5 @@ export { useSignTransaction } from './useSignTransaction';
 export { useSendTransaction } from './useSendTransaction';
 export { useWalletAddress } from './useWalletAddress';
 export { useWalletBalance } from './useWalletBalance';
+export { useMorselPay } from './useMorselPay';
+export type { UseMorselPay } from './useMorselPay';

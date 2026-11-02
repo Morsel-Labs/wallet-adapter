@@ -8,6 +8,14 @@ export { detectMorselCookieProvider, detectStandardMorselProvider } from './core
 export * from './core/constants';
 export type { CookieWalletAdapter } from './core/CookieWalletAdapter';
 
+// Morsel Pay
+export {
+  morselPay, MorselPayError, checkoutIdOf, morselCheckoutUrl, payRpcUrl, MORSEL_PAY_API, MORSEL_PAY_CHECKOUT,
+} from './core/pay';
+export type {
+  MorselPayOptions, MorselPayResult, MorselPayStatus, MorselPayErrorCode, MorselPayWallet, MorselCheckout,
+} from './core/pay';
+
 // React
 export { WalletProvider } from './react/WalletProvider';
 export { useWallet } from './react/useWallet';
@@ -18,6 +26,8 @@ export * from './react/hooks';
 
 // UI
 export { ConnectButton } from './ui/ConnectButton';
+export { MorselPay } from './ui/MorselPay';
+export type { MorselPayProps } from './ui/MorselPay';
 export { WalletModal } from './ui/WalletModal';
 export { WalletModalProvider, useWalletModal, useOptionalWalletModal } from './ui/WalletModalProvider';
 export type { WalletModalContextState, WalletModalOpenOptions, WalletModalView } from './ui/WalletModalProvider';
