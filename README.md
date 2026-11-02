@@ -195,6 +195,21 @@ wallet said it sent something. Errors carry a `code`: `expired`, `closed`, `reje
 
 Your server learns it too, from the signed `checkout.session.completed` webhook: trust that, not the page.
 
+### Subscriptions
+
+A recurring charge, paid each period straight from the customer's wallet on the wallet's own recurring
+rails: USDC on Solana, COOK on Cookie Chain. The customer approves it once in Morsel and stops it there.
+
+```bash
+curl https://api.dumpsack.xyz/v1/pay/subscriptions \
+  -H "Authorization: Bearer sk_live_…" -H "Content-Type: application/json" \
+  -d '{"network":"solana","amount":"9.99","interval":"month","cycles":12,"description":"Gold"}'
+# → { "id": "sub_…", "url": "https://morselwallet.app/subscribe/sub_…", "status": "incomplete", … }
+```
+
+Send the customer to `url`. Webhooks: `customer.subscription.created` once it is set up, `invoice.paid`
+(with the payment) for every period, `customer.subscription.deleted` when it ends or is stopped.
+
 ## Morsel adapter (core)
 
 ```ts
