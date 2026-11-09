@@ -1,8 +1,8 @@
 {
   "name": "@morsel-wallet/adapter",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "type": "module",
-  "description": "Wallet adapter for Morsel / Cookie Chain: core, React hooks, and the Morsel connect widget",
+  "description": "Connect a wallet to a dApp on any SVM network (Solana, Cookie Chain, Fogo, Sonic SVM, X1, Solayer): Morsel and every Wallet Standard wallet, React hooks and the Morsel connect widget",
   "homepage": "https://connect.morselwallet.app",
   "repository": {
     "type": "git",
@@ -69,6 +69,11 @@
     "chain",
     "solana",
     "svm",
+    "fogo",
+    "sonic-svm",
+    "x1",
+    "solayer",
+    "wallet-standard",
     "react",
     "connect",
     "wallet-connect",
