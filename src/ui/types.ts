@@ -27,9 +27,9 @@ export interface ConnectButtonProps {
   theme?: 'dark' | 'light' | 'system' | 'auto';
   /** Any CSS colour; also settable with the `--mw-accent` CSS variable. */
   accentColor?: string;
-  /** Pass a Connection to show the native balance in the account chip. */
+  /** Pass a Connection to show the native balance in the account chip (useChain().connection for the app's network). */
   connection?: Connection | null;
-  /** Symbol shown after the balance (default "COOK"). */
+  /** Symbol shown after the balance (default: the app network's gas token, e.g. "FOGO"; "COOK" outside a WalletProvider). */
   balanceSymbol?: string;
   /** Show the Morsel mark on the connect button (default true). */
   showLogo?: boolean;

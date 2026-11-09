@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useWallet } from '../../react/useWallet';
 import { useWalletBalance } from '../../react/hooks/useWalletBalance';
+import { useOptionalChain } from '../../react/useChain';
 import { MORSEL_LOGO_DATA_URI } from '../../core/constants';
 import { useOptionalWalletModal } from '../WalletModalProvider';
 import type { ConnectButtonProps } from '../types';
@@ -25,7 +26,7 @@ export function AccountButton({
   theme,
   accentColor,
   connection,
-  balanceSymbol = 'COOK',
+  balanceSymbol,
   showLogo = true,
   size = 'md',
   nonce,
@@ -37,6 +38,9 @@ export function AccountButton({
   const btnRef = useRef<HTMLButtonElement>(null);
   const [menu, setMenu] = useState<'closed' | 'open' | 'closing'>('closed');
   const { balance } = useWalletBalance(connection ?? null, { autoFetch: !!connection });
+  // The app's network: its mark on the chip, its gas token after the balance.
+  const chain = useOptionalChain()?.chain ?? null;
+  const symbol = balanceSymbol ?? chain?.native.symbol ?? 'COOK';
 
   const address = connected && publicKey ? publicKey.toBase58() : null;
   const scopeStyle = accentColor ? ({ ['--mw-accent' as string]: accentColor } as React.CSSProperties) : undefined;
@@ -89,7 +93,7 @@ export function AccountButton({
   }
 
   const walletIconSrc = activeAdapter && isMorselAdapterName(activeAdapter.name) ? MORSEL_LOGO_DATA_URI : activeAdapter?.icon;
-  const balanceText = balance !== null && balance !== undefined ? `${formatBalance(balance)} ${balanceSymbol}` : null;
+  const balanceText = balance !== null && balance !== undefined ? `${formatBalance(balance)} ${symbol}` : null;
 
   return (
     <>
@@ -102,7 +106,7 @@ export function AccountButton({
         disabled={disabled}
         aria-haspopup="menu"
         aria-expanded={menu === 'open'}
-        aria-label={`Account ${shortAddress(address)}`}
+        aria-label={chain ? `Account ${shortAddress(address)} on ${chain.name}` : `Account ${shortAddress(address)}`}
         onClick={() => setMenu((m) => (m === 'open' ? 'closing' : 'open'))}
       >
         <span className="mw-chip-ava">
@@ -113,6 +117,7 @@ export function AccountButton({
             </span>
           )}
         </span>
+        {chain && <img className="mw-chip-net" src={chain.icon} alt="" title={chain.name} width={16} height={16} draggable={false} />}
         <span>{shortAddress(address)}</span>
         {balanceText && <span className="mw-chip-bal">{balanceText}</span>}
         <ChevronDown size={15} className="mw-chev" />
@@ -126,6 +131,7 @@ export function AccountButton({
             closing={menu === 'closing'}
             address={address}
             walletName={activeAdapter ? displayWalletName(activeAdapter.name) : ''}
+            networkName={chain?.name ?? ''}
             walletIconSrc={walletIconSrc}
             balanceText={balanceText}
             onRequestClose={() => setMenu((m) => (m === 'open' ? 'closing' : m))}
@@ -157,6 +163,7 @@ interface MenuProps {
   closing: boolean;
   address: string;
   walletName: string;
+  networkName: string;
   walletIconSrc?: string;
   balanceText: string | null;
   canSwitch: boolean;
@@ -261,7 +268,7 @@ function AccountMenu(p: MenuProps) {
         </span>
         <span className="mw-menu-id">
           <span className="mw-menu-addr">{shortAddress(p.address)}</span>
-          <span className="mw-menu-meta">{[p.balanceText, p.walletName].filter(Boolean).join(' · ')}</span>
+          <span className="mw-menu-meta">{[p.balanceText, p.walletName, p.networkName].filter(Boolean).join(' · ')}</span>
         </span>
       </div>
       <div className="mw-menu-sep" />

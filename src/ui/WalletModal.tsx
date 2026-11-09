@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
-import { useWallet } from '../react';
+import { useWallet, useOptionalChain } from '../react';
+import { walletsForChain } from './kit/wallets';
 import { useWalletModal } from './WalletModalProvider';
 import { WalletModalProps } from './modalTypes';
 import { ConnectWidget } from './kit/ConnectWidget';
@@ -27,6 +28,10 @@ function HeadlessWalletModal({
 }: WalletModalProps) {
   const { adapters, selectAdapter, activeAdapterIndex, connected } = useWallet();
   const { visible, close } = useWalletModal();
+  // Morsel, and the other wallets that advertise the app's network.
+  const chain = useOptionalChain()?.chain ?? null;
+  const { morselIndex, others } = walletsForChain(adapters, chain);
+  const listed = new Set([morselIndex, ...others.map((x) => x.i)]);
 
   useEffect(() => {
     if (connected && visible) close();
@@ -75,7 +80,7 @@ function HeadlessWalletModal({
     <div className={overlayClassName} style={!overlayClassName ? overlayStyle : undefined}>
       <div className={className} style={!className ? modalStyle : undefined} role="dialog" aria-modal="true" aria-label={title}>
         <h2>{title}</h2>
-        {adapters.map((adapter, index) => (
+        {adapters.map((adapter, index) => listed.has(index) && (
           <div key={index}>
             <h3>
               {adapter.name}

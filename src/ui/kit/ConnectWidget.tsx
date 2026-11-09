@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useWallet } from '../../react/useWallet';
+import { useOptionalChain } from '../../react/useChain';
+import { walletsForChain, type WalletEntry } from './wallets';
 import type { CookieWalletAdapter } from '../../core/CookieWalletAdapter';
 import type { MorselRelayStatus } from '../../core/types';
 import { MORSEL_COOKIE_WALLET_URL, MORSEL_LOGO_DATA_URI, MORSEL_RELAY_PAIRING_TTL_MS, MORSEL_WEBSITE_URL, morselBrowseLink } from '../../core/constants';
@@ -29,6 +31,7 @@ import {
   AppleGlyph,
   BackIcon,
   CheckIcon,
+  ChevronDown,
   ChevronRight,
   ChromeGlyph,
   CloseIcon,
@@ -123,7 +126,8 @@ interface Snapshot {
   dir: number;
 }
 
-function WidgetLayer(props: WalletModalProps & { closing: boolean; onExited: () => void }) {
+/** The widget itself, without the portal (exported for tests; dApps render <WalletModal />). */
+export function WidgetLayer(props: WalletModalProps & { closing: boolean; onExited: () => void }) {
   const { closing, onExited } = props;
   const wallet = useWallet();
   const { adapters, selectAdapter, activeAdapterIndex, connected, publicKey } = wallet;
@@ -136,7 +140,11 @@ function WidgetLayer(props: WalletModalProps & { closing: boolean; onExited: () 
   const anchorEl = modal.options.anchor ?? null;
   const placement: 'center' | 'anchor' = props.placement === 'anchor' && !sheet && anchorEl ? 'anchor' : 'center';
 
-  const morselIndex = adapters.findIndex((a) => isMorselAdapterName(a.name));
+  // Other wallets are offered only on a network they advertise; Morsel on every one.
+  const chainState = useOptionalChain();
+  const chain = chainState?.chain ?? null;
+  const lists = useMemo(() => walletsForChain(adapters, chain), [adapters, chain]);
+  const morselIndex = lists.morselIndex;
   const morsel = (morselIndex >= 0 ? adapters[morselIndex] : null) as MorselLike | null;
 
   // The relay is open only while a QR can be on screen: when the widget has gone, an unscanned session is
@@ -725,7 +733,7 @@ function WidgetLayer(props: WalletModalProps & { closing: boolean; onExited: () 
             </div>
             <div ref={viewRef} key={viewKey} className="mw-view" tabIndex={-1} data-view={view.name}>
               {view.name === 'picker' && renderPicker()}
-              {view.name === 'more' && <MoreView adapters={adapters} morselIndex={morselIndex} rowProps={rowProps} />}
+              {view.name === 'more' && <MoreView list={lists.others} rowProps={rowProps} />}
               {view.name === 'qr' && renderQr()}
               {view.name === 'connecting' && renderConnecting(view)}
               {view.name === 'connected' && renderConnected()}
@@ -741,17 +749,28 @@ function WidgetLayer(props: WalletModalProps & { closing: boolean; onExited: () 
 
   // ---- views ------------------------------------------------------------------------------------
   function renderPicker() {
-    const others = adapters.map((a, i) => ({ a, i })).filter((x) => x.i !== morselIndex);
-    const detected = others.filter((x) => x.a.readyState === 'Installed');
+    const { others, detected, unsupported } = lists;
     const shown = detected.slice(0, 3);
     const hidden = [...detected.slice(3), ...others.filter((x) => x.a.readyState !== 'Installed')];
     const morselConnected = connected && activeAdapterIndex === morselIndex && morselIndex >= 0;
+    // No other installed wallet works on this network: say, calmly, that Morsel does.
+    const onlyMorsel = !!chain && detected.length === 0;
+    const heroSub = chain ? `Works on ${chain.name}` : 'Works on every SVM network';
+    // The app's networks: a compact picker (the current one; it opens a list), whatever their number.
+    const switchable = !props.networks && chainState && chainState.chains.length > 1 ? chainState : null;
     let i = 0;
     return (
       <>
         {props.subtitle && <p className="mw-sub">{props.subtitle}</p>}
         {props.networks && props.networks.length > 1 && (
-          <NetworkSwitch networks={props.networks} selectedNetworkId={props.selectedNetworkId} onNetworkChange={props.onNetworkChange} />
+          <NetworkPicker networks={props.networks} selectedNetworkId={props.selectedNetworkId} onNetworkChange={props.onNetworkChange} />
+        )}
+        {switchable && (
+          <NetworkPicker
+            networks={switchable.chains.map((c) => ({ id: c.key, name: c.name, icon: c.icon }))}
+            selectedNetworkId={switchable.chain.key}
+            onNetworkChange={(key) => switchable.setChain(key)}
+          />
         )}
         <div className="mw-scroll">
           <button type="button" className="mw-hero mw-stagger" style={{ ['--i' as string]: i++ }} onClick={onMorsel} data-mw-nav="">
@@ -760,7 +779,7 @@ function WidgetLayer(props: WalletModalProps & { closing: boolean; onExited: () 
             </span>
             <span className="mw-hero-text">
               <span className="mw-hero-name">Morsel</span>
-              <span className="mw-hero-sub">Built for Cookie Chain</span>
+              <span className="mw-hero-sub">{heroSub}</span>
             </span>
             {morselConnected ? (
               <span className="mw-row-meta">
@@ -771,6 +790,11 @@ function WidgetLayer(props: WalletModalProps & { closing: boolean; onExited: () 
               <span className="mw-pill">{props.connectLabel ?? 'Connect'}</span>
             )}
           </button>
+          {onlyMorsel && (
+            <p className="mw-note mw-stagger" style={{ ['--i' as string]: i++ }}>
+              {onlyMorselNote(chain!.name, unsupported.map((x) => displayWalletName(x.a.name)))}
+            </p>
+          )}
           {shown.length > 0 && (
             <div className="mw-label mw-stagger" style={{ ['--i' as string]: i++ }}>
               Detected
@@ -969,7 +993,7 @@ function WidgetLayer(props: WalletModalProps & { closing: boolean; onExited: () 
         <div className="mw-center mw-get-head">
           <img className="mw-logo-img mw-get-logo" data-mw-shared={SHARED_MORSEL} src={MORSEL_LOGO_DATA_URI} alt="" width={56} height={56} draggable={false} />
           <h3 className="mw-h">Morsel Wallet</h3>
-          <p className="mw-p">Self-custody for Cookie Chain and Solana. No email, no sign-up.</p>
+          <p className="mw-p">Self-custody on Solana and every SVM network. No email, no sign-up.</p>
         </div>
         {mobile ? (
           <div className="mw-actions mw-stagger" style={{ ['--i' as string]: 1 }}>
@@ -1007,6 +1031,15 @@ function WidgetLayer(props: WalletModalProps & { closing: boolean; onExited: () 
   }
 }
 
+/** "Morsel supports Fogo." and, when installed wallets were left out, which ones do not (yet). */
+export function onlyMorselNote(network: string, without: string[]): string {
+  const lead = `Morsel supports ${network}.`;
+  if (without.length === 0) return lead;
+  if (without.length === 1) return `${lead} ${without[0]} does not yet.`;
+  if (without.length === 2) return `${lead} ${without[0]} and ${without[1]} do not yet.`;
+  return `${lead} Your other wallets do not yet.`;
+}
+
 interface RowShared {
   activeIndex: number;
   onWallet: (index: number) => void;
@@ -1042,12 +1075,8 @@ function WalletRow({
   );
 }
 
-function MoreView({ adapters, morselIndex, rowProps }: { adapters: CookieWalletAdapter[]; morselIndex: number; rowProps: RowShared }) {
+function MoreView({ list, rowProps }: { list: WalletEntry[]; rowProps: RowShared }) {
   const [q, setQ] = useState('');
-  const list = adapters
-    .map((a, i) => ({ a, i }))
-    .filter((x) => x.i !== morselIndex)
-    .sort((x, y) => Number(y.a.readyState === 'Installed') - Number(x.a.readyState === 'Installed'));
   const needle = q.trim().toLowerCase();
   const filtered = list.filter((x) => !needle || x.a.name.toLowerCase().includes(needle));
   return (
@@ -1070,29 +1099,92 @@ function MoreView({ adapters, morselIndex, rowProps }: { adapters: CookieWalletA
   );
 }
 
-function NetworkSwitch({
+/**
+ * The network picker: one compact button naming the current network, which opens the list of the app's
+ * networks in place (a disclosure: the button says whether it is open; the list is plain buttons, the
+ * current one marked). It fits any number of networks in the card and the phone sheet. Arrow keys move
+ * through the list, Esc closes it and returns to the button (without closing the widget).
+ */
+export function NetworkPicker({
   networks,
   selectedNetworkId,
   onNetworkChange,
-}: Pick<WalletModalProps, 'selectedNetworkId' | 'onNetworkChange'> & { networks: NonNullable<WalletModalProps['networks']> }) {
+  defaultOpen = false,
+}: Pick<WalletModalProps, 'selectedNetworkId' | 'onNetworkChange'> & { networks: NonNullable<WalletModalProps['networks']>; defaultOpen?: boolean }) {
   const [local, setLocal] = useState(selectedNetworkId ?? networks[0]?.id);
+  const [open, setOpen] = useState(defaultOpen);
+  const listId = useRef(`mw-n-${Math.random().toString(36).slice(2, 8)}`).current;
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
   const selected = selectedNetworkId ?? local;
+  const current = networks.find((n) => n.id === selected) ?? networks[0];
+
+  useEffect(() => {
+    if (!open) return;
+    const items = Array.from(listRef.current?.querySelectorAll<HTMLElement>('button') ?? []);
+    (items.find((b) => b.getAttribute('aria-current') === 'true') ?? items[0])?.focus({ preventScroll: true } as FocusOptions);
+  }, [open]);
+
+  const close = (refocus: boolean) => {
+    setOpen(false);
+    if (refocus) btnRef.current?.focus();
+  };
+  const onListKey = (e: React.KeyboardEvent) => {
+    const items = Array.from(listRef.current?.querySelectorAll<HTMLElement>('button') ?? []);
+    const i = items.indexOf(document.activeElement as HTMLElement);
+    if (e.key === 'Escape') {
+      e.stopPropagation();
+      e.preventDefault();
+      close(true);
+    } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.stopPropagation();
+      e.preventDefault();
+      const n = e.key === 'ArrowDown' ? (i + 1) % items.length : (i - 1 + items.length) % items.length;
+      items[i < 0 ? 0 : n]?.focus();
+    } else if (e.key === 'Home' || e.key === 'End') {
+      e.preventDefault();
+      items[e.key === 'Home' ? 0 : items.length - 1]?.focus();
+    }
+  };
+
+  if (!current) return null;
   return (
-    <div className="mw-seg" role="group" aria-label="Network">
-      {networks.map((n) => (
-        <button
-          key={n.id}
-          type="button"
-          aria-pressed={n.id === selected}
-          onClick={() => {
-            setLocal(n.id);
-            onNetworkChange?.(n.id);
-          }}
-        >
-          {n.icon && <img src={n.icon} alt="" width={16} height={16} />}
-          {n.name}
-        </button>
-      ))}
+    <div className="mw-net">
+      <button
+        ref={btnRef}
+        type="button"
+        className="mw-netbtn"
+        aria-expanded={open}
+        aria-controls={listId}
+        aria-label={`Network: ${current.name}. Change network`}
+        onClick={() => setOpen((o) => !o)}
+      >
+        {current.icon && <img src={current.icon} alt="" width={16} height={16} />}
+        <span className="mw-netbtn-name">{current.name}</span>
+        <ChevronDown size={14} className="mw-chev" />
+      </button>
+      {open && (
+        <ul ref={listRef} id={listId} className="mw-netlist" aria-label="Networks" onKeyDown={onListKey}>
+          {networks.map((n) => (
+            <li key={n.id}>
+              <button
+                type="button"
+                className="mw-netopt"
+                aria-current={n.id === current.id ? 'true' : undefined}
+                onClick={() => {
+                  setLocal(n.id);
+                  if (n.id !== current.id) onNetworkChange?.(n.id);
+                  close(true);
+                }}
+              >
+                {n.icon && <img src={n.icon} alt="" width={18} height={18} />}
+                <span className="mw-netopt-name">{n.name}</span>
+                {n.id === current.id && <CheckIcon size={15} className="mw-netopt-check" />}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
