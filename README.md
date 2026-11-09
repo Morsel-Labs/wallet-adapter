@@ -216,15 +216,50 @@ Send the customer to `url`. Webhooks: `customer.subscription.created` once it is
 import { MorselCookieWalletAdapter } from '@morsel-wallet/adapter/core';
 
 const morsel = new MorselCookieWalletAdapter();
-morsel.wcUri;                 // morsel://connect?... pairing URI for your own QR
+morsel.startRelaySession();   // when your QR view opens: mints the pairing URI, opens the relay
+morsel.wcUri;                 // morsel://connect?... pairing URI for your own QR ('' until started)
 morsel.relayStatus;           // 'waiting' | 'scanned' | 'rejected' | 'connected' | 'idle'
 morsel.on('relayStatusChange', (status) => {});
 morsel.on('wcUriChange', (uri) => {});
 morsel.restartRelaySession(); // fresh QR (the relay keeps a pairing for 5 minutes)
+morsel.stopRelaySession();    // when your QR view closes: nothing stays open to the relay
+morsel.relayPeerFingerprint;  // 'xxxx-xxxx' of the paired phone's channel key, while connected
 ```
 
-The relay is end-to-end encrypted (NaCl box) between the page and the Morsel app; the relay server
-only forwards ciphertext.
+Constructing the adapter contacts nothing: the relay is opened when a QR is asked for (the widget's
+QR view, `startRelaySession()`, or a `connect()` that finds no Morsel on the page). The relay is
+end-to-end encrypted (NaCl box) between the page and the Morsel app; the relay server only forwards
+ciphertext.
+
+### How the phone is authenticated
+
+The phone authenticates the page from the QR (the page's X25519 key travels out of band). In the
+other direction, the Morsel app proves the address it connects: `session_approve` carries an ed25519
+signature, by that address's key, over
+
+```
+morsel-connect/approve/v1
+<sessionId>                        the QR's `s`
+<dappX25519Pub>                    the QR's `k` (base64url, no padding)
+<walletX25519Pub>                  the `pubkey` of wallet_hello (base64url, no padding)
+<walletAddress>                    base58
+```
+
+(UTF-8, lines joined with `\n`, no trailing newline; see `src/core/approve-proof.ts`). The adapter
+rebuilds those bytes from what it observed itself and verifies the signature before it reports a
+connection; a missing, forged or replayed proof is refused with a `WalletConnectionError` and a fresh
+QR. Only the first `wallet_hello` on a session binds the channel key. Hardware wallets sign the Solana
+off-chain envelope carrying the payload and send it as `signedMessage`.
+
+**Compatibility:** the proof is required, so adapter 0.3.0 and later connect over the relay only to
+Morsel app builds that sign `session_approve` (the app's `relay-service.js` with
+`approveProofPayload`, shipped from the `sec/relay` change of 2026-11-09 onward). An older app's
+approval is refused with "Morsel on your phone needs an update before it can connect here."
+Extension and in-app-browser connections do not go through the relay and are unaffected.
+
+Every signing result is bound to its request: a returned transaction must carry the same message
+bytes and a valid signature of the connected account, and a message signature must verify for the
+connected key (`signedMessage` is returned when a hardware wallet signed an envelope instead).
 
 ## Hooks
 
@@ -247,6 +282,15 @@ const address = useWalletAddress(); // base58 string or null
 const signMessage = useSignMessage();
 const { signature } = await signMessage(new TextEncoder().encode('hello'));
 ```
+
+## Upgrading from 0.2.x
+
+- The relay is no longer opened by the constructor. If you render your own QR from `wcUri`, call
+  `startRelaySession()` when your QR view opens and `stopRelaySession()` when it closes; the widget
+  does this itself.
+- The Morsel app must be a build that signs `session_approve` (see "How the phone is authenticated").
+- `signMessage` may return `signedMessage` (a hardware wallet's envelope): verify against it when set.
+- Full list in `CHANGELOG.md`.
 
 ## Upgrading from 0.1.x
 

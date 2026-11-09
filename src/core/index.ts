@@ -1,4 +1,12 @@
 export { MorselCookieWalletAdapter } from './MorselCookieWalletAdapter';
+export {
+  APPROVE_PROOF_DOMAIN,
+  approveProofPayload,
+  verifyApproveProof,
+  verifySignedMessage,
+  relayPeerFingerprint,
+} from './approve-proof';
+export type { ApproveProofInput } from './approve-proof';
 export { StandardWalletAdapter } from './StandardWalletAdapter';
 export { COOKIE_CHAIN } from './chains';
 export * from './types';

@@ -56,6 +56,7 @@ type MorselLike = CookieWalletAdapter & {
   wcUriCreatedAt?: number;
   relayStatus?: MorselRelayStatus;
   restartRelaySession?: () => void;
+  stopRelaySession?: () => void;
 };
 
 const SHARED_MORSEL = 'morsel';
@@ -137,6 +138,19 @@ function WidgetLayer(props: WalletModalProps & { closing: boolean; onExited: () 
 
   const morselIndex = adapters.findIndex((a) => isMorselAdapterName(a.name));
   const morsel = (morselIndex >= 0 ? adapters[morselIndex] : null) as MorselLike | null;
+
+  // The relay is open only while a QR can be on screen: when the widget has gone, an unscanned session is
+  // closed. One the phone is already looking at (scanned) stays, so an approval made a moment later lands.
+  const morselRef = useRef(morsel);
+  morselRef.current = morsel;
+  useEffect(
+    () => () => {
+      const m = morselRef.current;
+      const st = m?.relayStatus;
+      if (m?.stopRelaySession && (st === 'waiting' || st === 'rejected')) m.stopRelaySession();
+    },
+    []
+  );
 
   const links = {
     install: props.links?.install ?? MORSEL_COOKIE_WALLET_URL,

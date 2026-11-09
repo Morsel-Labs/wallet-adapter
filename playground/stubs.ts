@@ -14,6 +14,7 @@
 import nacl from 'tweetnacl';
 import bs58 from 'bs58';
 import EventEmitter from 'eventemitter3';
+import { approveProofPayload } from '../src/core/approve-proof';
 
 const params = new URLSearchParams(location.search);
 const w = window as any;
@@ -88,14 +89,16 @@ const relay: any = (mw.relay = {
   latest: null as FakeRelaySocket | null,
   walletKp: null as nacl.BoxKeyPair | null,
   dappPub: null as Uint8Array | null,
+  sessionId: null as string | null,
   proposalId: null as string | null,
   /** The phone scans the QR: joins the session and says hello. */
   scan() {
     const s: FakeRelaySocket = relay.latest;
     const uri: string = mw.morsel?.wcUri;
     if (!s || !uri) throw new Error('no live QR');
-    const k = new URL(uri.replace('morsel://', 'https://x/')).searchParams.get('k')!;
-    relay.dappPub = unb64(k);
+    const q = new URL(uri.replace('morsel://', 'https://x/')).searchParams;
+    relay.sessionId = q.get('s')!;
+    relay.dappPub = unb64(q.get('k')!);
     relay.walletKp = nacl.box.keyPair();
     s.emit({ type: 'peer_joined', role: 'wallet' });
     s.emit({ type: 'wallet_hello', pubkey: b64url(relay.walletKp.publicKey) });
@@ -117,8 +120,19 @@ const relay: any = (mw.relay = {
     all.set(box, 24);
     relay.latest.emit({ type: 'enc', payload: b64(all) });
   },
+  /**
+   * Approve as the demo account: the wallet's proof (approve-proof.ts) signed with its ed25519 key. Any
+   * other `address` is approved with the demo key's signature, which the adapter must refuse.
+   */
   approve(address = MORSEL_ADDRESS) {
-    relay.send({ type: 'session_approve', id: relay.proposalId, walletAddress: address });
+    const payload = approveProofPayload({
+      sessionId: relay.sessionId,
+      dappX25519Pub: relay.dappPub,
+      walletX25519Pub: relay.walletKp.publicKey,
+      walletAddress: bs58.decode(address),
+    });
+    const signature = bs58.encode(nacl.sign.detached(payload, keyFor('morsel-demo-account').secretKey));
+    relay.send({ type: 'session_approve', id: relay.proposalId, walletAddress: address, signature });
   },
   reject() {
     relay.send({ type: 'session_reject', id: relay.proposalId });

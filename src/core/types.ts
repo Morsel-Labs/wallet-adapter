@@ -17,7 +17,7 @@ export interface MorselCookieProvider {
   disconnect?(): Promise<void>;
   signTransaction<T extends Transaction | VersionedTransaction>(transaction: T): Promise<T>;
   signAllTransactions?<T extends Transaction | VersionedTransaction>(transactions: T[]): Promise<T[]>;
-  signMessage?(message: Uint8Array): Promise<Uint8Array | { signature: Uint8Array | number[] | string }>;
+  signMessage?(message: Uint8Array): Promise<Uint8Array | { signature: Uint8Array | number[] | string; signedMessage?: Uint8Array | number[] | string }>;
   on?(event: 'accountChanged', listener: (publicKey: PublicKey | string | null) => void): void;
   off?(event: 'accountChanged', listener: (publicKey: PublicKey | string | null) => void): void;
 }
@@ -37,5 +37,11 @@ export type WalletAdapterEvents = 'connect' | 'disconnect' | 'error' | 'readySta
 export type MorselRelayStatus = 'idle' | 'waiting' | 'scanned' | 'rejected' | 'connected';
 
 export interface SignedMessageResponse {
+  /** 64-byte ed25519 signature by the connected account, verified by the adapter before it is returned. */
   signature: Uint8Array;
+  /**
+   * Set only when the wallet signed an off-chain message envelope that carries your message (a hardware
+   * wallet). The signature is over these bytes: verify against them, not against the raw message.
+   */
+  signedMessage?: Uint8Array;
 }

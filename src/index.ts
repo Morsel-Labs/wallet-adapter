@@ -1,5 +1,13 @@
 // Core
 export { MorselCookieWalletAdapter } from './core/MorselCookieWalletAdapter';
+export {
+  APPROVE_PROOF_DOMAIN,
+  approveProofPayload,
+  verifyApproveProof,
+  verifySignedMessage,
+  relayPeerFingerprint,
+} from './core/approve-proof';
+export type { ApproveProofInput } from './core/approve-proof';
 export { StandardWalletAdapter } from './core/StandardWalletAdapter';
 export { COOKIE_CHAIN } from './core/chains';
 export * from './core/types';

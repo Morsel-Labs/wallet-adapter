@@ -1,6 +1,6 @@
 {
   "name": "@morsel-wallet/adapter",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "description": "Wallet adapter for Morsel / Cookie Chain: core, React hooks, and the Morsel connect widget",
   "homepage": "https://connect.morselwallet.app",

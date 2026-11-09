@@ -8,8 +8,13 @@ import { detectMorselCookieProvider, detectStandardMorselProvider } from './dete
 import { MORSEL_COOKIE_WALLET_NAME, MORSEL_COOKIE_WALLET_URL, MORSEL_COOKIE_WALLET_ICON, morselBrowseLink } from './constants';
 import { CookieWalletAdapter } from './CookieWalletAdapter';
 import { toBase64, fromBase64, toBase64Url } from './base64';
+import { bytesEqual, relayPeerFingerprint, verifyApproveProof, verifySignedMessage } from './approve-proof';
 
 const RELAY_BASE = 'wss://api.dumpsack.xyz';
+
+/** How often the page is checked for an injected provider, and for how long at most (it then stops). */
+const PROVIDER_POLL_MS = 1000;
+const PROVIDER_POLL_MAX_MS = 30_000;
 
 
 const toBase64url = toBase64Url;
@@ -43,6 +48,55 @@ function decrypt(payload: string, theirPubKey: Uint8Array, mySecretKey: Uint8Arr
   return JSON.parse(new TextDecoder().decode(plaintext));
 }
 
+// ---- binding a signing result to its request --------------------------------------------------------
+
+/** The wire bytes of a transaction, legacy or versioned, with signatures as they stand. */
+function wireBytesOf(tx: Transaction | VersionedTransaction): Uint8Array {
+  return tx instanceof VersionedTransaction
+    ? tx.serialize()
+    : new Uint8Array(tx.serialize({ requireAllSignatures: false, verifySignatures: false }));
+}
+
+/**
+ * Check that `signedBytes` is the transaction `requestBytes` was, signed: the same message bytes (read
+ * from the wire, never recompiled), and when `signer` is one of its required signers, a signature of
+ * that key over them. Throws a WalletSignTransactionError otherwise.
+ */
+function assertSignedMatches(requestBytes: Uint8Array, signedBytes: Uint8Array, signer: PublicKey | null): void {
+  let request: VersionedTransaction;
+  let signed: VersionedTransaction;
+  try {
+    request = VersionedTransaction.deserialize(requestBytes);
+    signed = VersionedTransaction.deserialize(signedBytes);
+  } catch {
+    throw new WalletSignTransactionError('The signed transaction could not be read');
+  }
+  const requestMessage = request.message.serialize();
+  const signedMessage = signed.message.serialize();
+  if (!bytesEqual(requestMessage, signedMessage)) {
+    throw new WalletSignTransactionError('The signed transaction does not match the request');
+  }
+  if (!signer) return;
+  const keys = signed.message.staticAccountKeys;
+  const required = signed.message.header.numRequiredSignatures;
+  const index = keys.findIndex((k) => k.equals(signer));
+  if (index < 0 || index >= required) return; // not a signer of this transaction: nothing of ours to check
+  const signature = signed.signatures[index];
+  if (!signature || !nacl.sign.detached.verify(signedMessage, signature, signer.toBytes())) {
+    throw new WalletSignTransactionError('The wallet returned no valid signature for this account');
+  }
+}
+
+/** Read a signature (or `signedMessage`) field in any of the shapes providers use. */
+function bytesField(value: unknown): Uint8Array | null {
+  if (value instanceof Uint8Array) return value;
+  if (Array.isArray(value) && value.every((x) => typeof x === 'number')) return new Uint8Array(value);
+  if (typeof value === 'string') {
+    try { return fromBase64(value); } catch { return null; }
+  }
+  return null;
+}
+
 
 type PendingRequest = {
   resolve: (v: any) => void;
@@ -50,19 +104,29 @@ type PendingRequest = {
   timerId: ReturnType<typeof setTimeout>;
 };
 
-type SessionCallbacks = {
+/** Why a `session_approve` was refused. */
+export type ApproveProofFailure = 'missing' | 'invalid';
+
+export type SessionCallbacks = {
   onScanned: () => void;
   onWalletLeft: () => void;
-  onApprove: (walletAddress: string) => void;
+  onApprove: (walletAddress: string, peerFingerprint: string) => void;
+  /** The peer claimed an address without proving it holds the key: the pairing is refused. */
+  onBadProof: (why: ApproveProofFailure) => void;
   onReject: () => void;
   onClose: (wasConnected: boolean) => void;
 };
 
-class MorselRelaySession {
+/**
+ * One pairing with the Morsel phone app over the relay. Exported for tests; dApps use the adapter.
+ */
+export class MorselRelaySession {
   readonly sessionId: string;
   readonly uri: string;
   connected = false;
   closed = false;
+  /** Fingerprint of the paired wallet's channel key, once approved (see relayPeerFingerprint). */
+  peerFingerprint: string | null = null;
 
   private keyPair: nacl.BoxKeyPair;
   private ws: WebSocket | null = null;
@@ -95,16 +159,20 @@ class MorselRelaySession {
       } else if (msg.type === 'peer_joined' && msg.role === 'wallet') {
         cb.onScanned();
 
-      } else if (msg.type === 'wallet_hello' && !this.walletPubKey) {
+      } else if (msg.type === 'wallet_hello') {
+        // The first well-formed hello binds this session to that channel key; every later one (another
+        // peer on the same session, or a replay) is ignored, so the key cannot be swapped under us.
+        if (this.walletPubKey) return;
+        let key: Uint8Array;
+        try { key = fromBase64url(String(msg.pubkey ?? '')); } catch { return; }
+        if (key.length !== nacl.box.publicKeyLength) return;
+        this.walletPubKey = key;
         cb.onScanned();
-        try {
-          this.walletPubKey = fromBase64url(msg.pubkey);
-          this.proposalId = generateRequestId();
-          const origin = typeof window !== 'undefined' ? window.location.origin : '';
-          const name = typeof document !== 'undefined' ? (document.title || window.location.hostname) : 'dApp';
-          const icon = origin ? `${origin}/favicon.ico` : '';
-          this._sendEncrypted({ type: 'session_proposal', id: this.proposalId, metadata: { name, icon, origin } });
-        } catch { /* ignore malformed hello */ }
+        this.proposalId = generateRequestId();
+        const origin = typeof window !== 'undefined' ? window.location.origin : '';
+        const name = typeof document !== 'undefined' ? (document.title || window.location.hostname) : 'dApp';
+        const icon = origin ? `${origin}/favicon.ico` : '';
+        this._sendEncrypted({ type: 'session_proposal', id: this.proposalId, metadata: { name, icon, origin } });
 
       } else if (msg.type === 'enc' && this.walletPubKey) {
         try {
@@ -125,12 +193,28 @@ class MorselRelaySession {
 
   private _handleDecrypted(msg: any, cb: SessionCallbacks): void {
     switch (msg.type) {
-      case 'session_approve':
-        if (msg.id === this.proposalId) {
-          this.connected = true;
-          cb.onApprove(msg.walletAddress);
-        }
+      case 'session_approve': {
+        if (msg.id !== this.proposalId || this.connected || !this.walletPubKey) break;
+        // The address is only taken from a peer that proves it holds its key (approve-proof.ts).
+        let address: PublicKey;
+        try { address = new PublicKey(String(msg.walletAddress ?? '')); } catch { cb.onBadProof('invalid'); break; }
+        if (msg.signature === undefined || msg.signature === null || msg.signature === '') { cb.onBadProof('missing'); break; }
+        const ok = verifyApproveProof(
+          {
+            sessionId: this.sessionId,
+            dappX25519Pub: this.keyPair.publicKey,
+            walletX25519Pub: this.walletPubKey,
+            walletAddress: address.toBytes(),
+          },
+          msg.signature,
+          msg.signedMessage
+        );
+        if (!ok) { cb.onBadProof('invalid'); break; }
+        this.connected = true;
+        this.peerFingerprint = relayPeerFingerprint(this.walletPubKey);
+        cb.onApprove(address.toBase58(), this.peerFingerprint);
         break;
+      }
 
       case 'session_reject':
         if (msg.id === this.proposalId) cb.onReject();
@@ -224,12 +308,20 @@ export class MorselCookieWalletAdapter extends EventEmitter<AdapterEvents> imple
   connecting = false;
   readyState: WalletReadyState = 'NotDetected';
   supportedTransactionVersions: ReadonlySet<'legacy' | 0> = new Set(['legacy', 0]);
-  /** The live `morsel://connect` pairing URI shown as the QR. */
+  /**
+   * The live `morsel://connect` pairing URI shown as the QR; empty until a relay session is started
+   * ({@link startRelaySession}, the widget's QR view, or a `connect()` with no provider on the page).
+   */
   wcUri = '';
   /** When the current {@link wcUri} was minted (ms epoch). The relay keeps it for 5 minutes. */
   wcUriCreatedAt = 0;
   /** Where the QR / relay pairing stands; see {@link MorselRelayStatus}. */
   relayStatus: MorselRelayStatus = 'idle';
+  /**
+   * While connected through the relay: a short fingerprint (`xxxx-xxxx`) of the phone's channel key,
+   * the key the end-to-end encryption and the wallet's signed proof are bound to. Null otherwise.
+   */
+  relayPeerFingerprint: string | null = null;
 
   private provider: MorselCookieProvider | null = null;
   private connectPromise: Promise<void> | null = null;
@@ -245,11 +337,9 @@ export class MorselCookieWalletAdapter extends EventEmitter<AdapterEvents> imple
   constructor() {
     super();
     this.autoDetect();
-    // Browser only: on the server (SSR) a timer per render would leak and keep Node alive.
-    if (typeof window !== 'undefined') {
-      this.refreshIntervalId = setInterval(() => this.refreshProvider(), 1000);
-      this._startRelaySession();
-    }
+    // Browser only: on the server (SSR) a timer per render would leak and keep Node alive. The relay is
+    // not contacted here: a session starts when the QR is asked for (nothing leaves the page before).
+    if (typeof window !== 'undefined') this._startProviderPolling();
   }
 
 
@@ -260,12 +350,38 @@ export class MorselCookieWalletAdapter extends EventEmitter<AdapterEvents> imple
   }
 
   /**
+   * Open a relay session and mint the pairing QR, if none is live. Call it when your QR view opens;
+   * the Morsel widget does. Does nothing on the server or while connected through the relay.
+   */
+  startRelaySession(): void {
+    if (typeof window === 'undefined' || this.relayConnected) return;
+    if (this.relaySession && !this.relaySession.closed) return;
+    this._startRelaySession();
+  }
+
+  /**
    * Mint a fresh pairing QR (new session id and keys). Use it to refresh an expired QR. A live
    * relay connection is left alone.
    */
   restartRelaySession(): void {
     if (typeof window === 'undefined' || this.relayConnected) return;
     this._startRelaySession();
+  }
+
+  /**
+   * Close an unpaired relay session and drop the QR, so nothing stays open to the relay while no QR
+   * is on screen. A connection made through the relay is left alone: that is `disconnect()`.
+   */
+  stopRelaySession(): void {
+    if (this.relayConnected) return;
+    this.relaySession?.end();
+    this.relaySession = null;
+    if (this.wcUri) {
+      this.wcUri = '';
+      this.wcUriCreatedAt = 0;
+      this.emit('wcUriChange', '');
+    }
+    this._setRelayStatus('idle');
   }
 
   private _startRelaySession(): void {
@@ -286,12 +402,13 @@ export class MorselCookieWalletAdapter extends EventEmitter<AdapterEvents> imple
         // it cannot be paired again: mint a fresh QR.
         if (this.relaySession === session) this._startRelaySession();
       },
-      onApprove: (walletAddress) => {
+      onApprove: (walletAddress, peerFingerprint) => {
         try {
           const pk = new PublicKey(walletAddress);
           this.publicKey = pk;
           this.connected = true;
           this.relayConnected = true;
+          this.relayPeerFingerprint = peerFingerprint;
           if (this.readyState !== 'Installed') {
             this.readyState = 'Installed';
             this.emit('readyStateChange', this.readyState);
@@ -299,6 +416,17 @@ export class MorselCookieWalletAdapter extends EventEmitter<AdapterEvents> imple
           this._setRelayStatus('connected');
           this.emit('connect', pk);
         } catch { /* ignore invalid address */ }
+      },
+      onBadProof: (why) => {
+        // Whoever answered holds the channel key but could not prove the address: not paired. The
+        // session is spent (its channel key is taken), so a fresh QR follows, and the page is told.
+        if (this.relaySession !== session) return;
+        this.emit('error', new WalletConnectionError(
+          why === 'missing'
+            ? 'Morsel on your phone needs an update before it can connect here.'
+            : 'The phone could not prove it holds this wallet. Scan the code again.'
+        ));
+        this._startRelaySession();
       },
       onReject: () => {
         this._setRelayStatus('rejected');
@@ -308,18 +436,38 @@ export class MorselCookieWalletAdapter extends EventEmitter<AdapterEvents> imple
       },
       onClose: (wasConnected) => {
         this.relayConnected = false;
+        this.relayPeerFingerprint = null;
         if (wasConnected && !this.provider) {
           this.publicKey = null;
           this.connected = false;
           this.emit('disconnect');
         }
-        if (!session.closed) {
-          setTimeout(() => this._startRelaySession(), 500);
+        // Dropped by the relay while still wanted (not ended by us): keep a QR live.
+        if (!session.closed && this.relaySession === session) {
+          setTimeout(() => {
+            if (this.relaySession === session && !session.closed) this._startRelaySession();
+          }, 500);
         }
       },
     });
   }
 
+
+  private _startProviderPolling(): void {
+    if (this.refreshIntervalId !== null) return;
+    const startedAt = Date.now();
+    this.refreshIntervalId = setInterval(() => {
+      this.refreshProvider();
+      // Found, or given long enough: an extension injects at load, so stop asking after a while.
+      if (this.provider || Date.now() - startedAt >= PROVIDER_POLL_MAX_MS) this._stopProviderPolling();
+    }, PROVIDER_POLL_MS);
+  }
+
+  private _stopProviderPolling(): void {
+    if (this.refreshIntervalId === null) return;
+    clearInterval(this.refreshIntervalId);
+    this.refreshIntervalId = null;
+  }
 
   refreshProvider(): void {
     // Injected provider first (window.morsel / cookie / dumpsack, any shape); if the wallet only
@@ -387,6 +535,8 @@ export class MorselCookieWalletAdapter extends EventEmitter<AdapterEvents> imple
       return new Promise<void>(() => { });
     }
     if (!this.provider) {
+      // No Morsel on this page: the way in is the QR. Open the relay now so `wcUri` is ready to show.
+      this.startRelaySession();
       const error = new WalletNotFoundError();
       this.emit('error', error);
       throw error;
@@ -436,9 +586,15 @@ export class MorselCookieWalletAdapter extends EventEmitter<AdapterEvents> imple
 
   async disconnect(): Promise<void> {
     if (this.relayConnected && this.relaySession) {
+      // End the paired session; a new QR is minted when a QR view next asks for one.
       this.relaySession.end();
+      this.relaySession = null;
       this.relayConnected = false;
-      this._startRelaySession();
+      this.relayPeerFingerprint = null;
+      this.wcUri = '';
+      this.wcUriCreatedAt = 0;
+      this.emit('wcUriChange', '');
+      this._setRelayStatus('idle');
     }
 
     if (this.provider) {
@@ -464,9 +620,12 @@ export class MorselCookieWalletAdapter extends EventEmitter<AdapterEvents> imple
     if (this.provider) {
       if (!this.connected) throw new WalletNotConnectedError();
       try {
-        return await this.provider.signTransaction(transaction);
+        const requestBytes = wireBytesOf(transaction);
+        const signed = await this.provider.signTransaction(transaction);
+        assertSignedMatches(requestBytes, wireBytesOf(signed), this.publicKey);
+        return signed;
       } catch (error) {
-        const walletError = new WalletSignTransactionError(error instanceof Error ? error.message : 'Unknown error');
+        const walletError = error instanceof WalletAdapterError ? error : new WalletSignTransactionError(error instanceof Error ? error.message : 'Unknown error');
         this.emit('error', walletError);
         throw walletError;
       }
@@ -475,18 +634,19 @@ export class MorselCookieWalletAdapter extends EventEmitter<AdapterEvents> imple
     if (this.relayConnected && this.relaySession) {
       try {
         const isVersioned = transaction instanceof VersionedTransaction;
-        const bytes = isVersioned
-          ? transaction.serialize()
-          : transaction.serialize({ requireAllSignatures: false, verifySignatures: false });
+        const bytes = wireBytesOf(transaction);
         const id = generateRequestId();
         const result = await this.relaySession.sendRequest(
           { type: 'sign_transaction', id, transaction: toBase64(bytes) },
           60_000
         );
+        if (typeof result?.transaction !== 'string') throw new WalletSignTransactionError('The wallet returned no transaction');
         const signed = fromBase64(result.transaction);
+        // Bound to the request: the same message, carrying this account's signature over it.
+        assertSignedMatches(bytes, signed, this.publicKey);
         return isVersioned ? VersionedTransaction.deserialize(signed) : Transaction.from(signed as any);
       } catch (error) {
-        const walletError = new WalletSignTransactionError(error instanceof Error ? error.message : 'Unknown error');
+        const walletError = error instanceof WalletAdapterError ? error : new WalletSignTransactionError(error instanceof Error ? error.message : 'Unknown error');
         this.emit('error', walletError);
         throw walletError;
       }
@@ -499,9 +659,15 @@ export class MorselCookieWalletAdapter extends EventEmitter<AdapterEvents> imple
     if (!this.connected) throw new WalletNotConnectedError();
     if (this.provider?.signAllTransactions) {
       try {
-        return await this.provider.signAllTransactions(transactions);
+        const requestBytes = transactions.map(wireBytesOf);
+        const signed = await this.provider.signAllTransactions(transactions);
+        if (!Array.isArray(signed) || signed.length !== transactions.length) {
+          throw new WalletSignTransactionError('The wallet returned a different number of transactions');
+        }
+        signed.forEach((tx, i) => assertSignedMatches(requestBytes[i], wireBytesOf(tx), this.publicKey));
+        return signed;
       } catch (error) {
-        const walletError = new WalletSignTransactionError(error instanceof Error ? error.message : 'Unknown error');
+        const walletError = error instanceof WalletAdapterError ? error : new WalletSignTransactionError(error instanceof Error ? error.message : 'Unknown error');
         this.emit('error', walletError);
         throw walletError;
       }
@@ -515,23 +681,17 @@ export class MorselCookieWalletAdapter extends EventEmitter<AdapterEvents> imple
       if (!this.provider.signMessage) throw new WalletSignMessageError('Sign message not supported');
       try {
         const result = await this.provider.signMessage(message);
-        let signature: Uint8Array;
-        if (result instanceof Uint8Array) {
-          signature = result;
-        } else if (Array.isArray(result) && result.every(x => typeof x === 'number')) {
-          signature = new Uint8Array(result);
-        } else if (typeof result === 'string') {
-          signature = fromBase64(result);
-        } else if (result && typeof result === 'object' && 'signature' in result) {
-          const sig = (result as any).signature;
-          if (sig instanceof Uint8Array) signature = sig;
-          else if (Array.isArray(sig)) signature = new Uint8Array(sig);
-          else if (typeof sig === 'string') signature = fromBase64(sig);
-          else throw new WalletSignMessageError('Unsupported signature format');
+        let signature: Uint8Array | null;
+        let signedMessage: Uint8Array | null = null;
+        if (result && typeof result === 'object' && !(result instanceof Uint8Array) && !Array.isArray(result) && 'signature' in result) {
+          signature = bytesField((result as any).signature);
+          if (!signature) throw new WalletSignMessageError('Unsupported signature format');
+          signedMessage = bytesField((result as any).signedMessage);
         } else {
-          throw new WalletSignMessageError('Invalid signature response');
+          signature = bytesField(result);
+          if (!signature) throw new WalletSignMessageError('Invalid signature response');
         }
-        return { signature };
+        return this._checkedSignedMessage(message, signature, signedMessage);
       } catch (error) {
         const walletError = error instanceof WalletAdapterError ? error : new WalletSignMessageError(error instanceof Error ? error.message : 'Unknown error');
         this.emit('error', walletError);
@@ -546,7 +706,10 @@ export class MorselCookieWalletAdapter extends EventEmitter<AdapterEvents> imple
           { type: 'sign_message', id, message: toBase64(message) },
           60_000
         );
-        return { signature: bs58.decode(result.signature) as unknown as Uint8Array };
+        if (typeof result?.signature !== 'string') throw new WalletSignMessageError('The wallet returned no signature');
+        const signature = new Uint8Array(bs58.decode(result.signature));
+        const signedMessage = typeof result.signedMessage === 'string' ? new Uint8Array(bs58.decode(result.signedMessage)) : null;
+        return this._checkedSignedMessage(message, signature, signedMessage);
       } catch (error) {
         const walletError = error instanceof WalletAdapterError ? error : new WalletSignMessageError(error instanceof Error ? error.message : 'Unknown error');
         this.emit('error', walletError);
@@ -555,6 +718,20 @@ export class MorselCookieWalletAdapter extends EventEmitter<AdapterEvents> imple
     }
 
     throw new WalletNotConnectedError();
+  }
+
+  /**
+   * A message signature is only handed back once it verifies for the connected account over the
+   * message itself, or over the off-chain envelope a hardware wallet signed (then `signedMessage`
+   * is returned too, so the dApp can verify the same bytes).
+   */
+  private _checkedSignedMessage(message: Uint8Array, signature: Uint8Array, signedMessage: Uint8Array | null): SignedMessageResponse {
+    if (!this.publicKey) throw new WalletNotConnectedError();
+    if (!verifySignedMessage(message, signature, this.publicKey.toBytes(), signedMessage)) {
+      throw new WalletSignMessageError('The signature does not verify for the connected account');
+    }
+    const envelope = signedMessage && !bytesEqual(signedMessage, message) ? signedMessage : undefined;
+    return envelope ? { signature, signedMessage: envelope } : { signature };
   }
 
   async sendTransaction(
@@ -569,16 +746,16 @@ export class MorselCookieWalletAdapter extends EventEmitter<AdapterEvents> imple
 
 
   destroy(): void {
-    if (this.refreshIntervalId !== null) {
-      clearInterval(this.refreshIntervalId);
-      this.refreshIntervalId = null;
-    }
+    this._stopProviderPolling();
     this.removeAllListeners();
     if (this.provider?.off) this.provider.off('accountChanged', this.accountChangedListener);
     if (typeof window !== 'undefined') window.removeEventListener('accountChanged', this.windowAccountChangedListener);
     this.relaySession?.end();
     this.relaySession = null;
     this.relayStatus = 'idle';
+    this.relayPeerFingerprint = null;
+    this.wcUri = '';
+    this.wcUriCreatedAt = 0;
     this.provider = null;
     this.publicKey = null;
     this.connected = false;

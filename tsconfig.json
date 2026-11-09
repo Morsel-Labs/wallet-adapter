@@ -13,7 +13,6 @@
     "allowSyntheticDefaultImports": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "downlevelIteration": true,
     "resolveJsonModule": true,
     "noEmit": false
   },
