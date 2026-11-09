@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Keypair, PublicKey, SystemProgram, Transaction } from '@solana/web3.js';
-import { morselPay, checkoutIdOf, morselCheckoutUrl, payRpcUrl, MorselPayError } from '../dist/core/index.js';
+import { morselPay, checkoutIdOf, morselCheckoutUrl, payRpcUrl, payChainOf, MorselPayError } from '../dist/core/index.js';
 
 const ID = 'cs_AbCdEf123456789012345678';
 const payer = Keypair.generate();
@@ -40,6 +40,28 @@ test('reads a checkout id from an id or its URL', () => {
   assert.equal(morselCheckoutUrl(ID), `https://morselwallet.app/checkout/${ID}`);
   assert.equal(payRpcUrl({ network: 'cookie', livemode: true }), 'https://rpc.cookiescan.io');
   assert.equal(payRpcUrl({ network: 'solana', livemode: false }), 'https://api.devnet.solana.com');
+});
+
+test('a checkout’s network comes from SVM_CHAINS; one it does not know is refused, never paid on Solana', () => {
+  assert.equal(payChainOf({ network: 'solana', livemode: true }).id, 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp');
+  assert.equal(payChainOf({ network: 'solana', livemode: false }).key, 'solana-devnet');
+  assert.equal(payChainOf({ network: 'cookie', livemode: false }).key, 'cookie', 'Cookie Chain test checkouts settle on Cookie Chain, as before');
+  assert.equal(payRpcUrl({ network: 'fogo', livemode: true }), 'https://mainnet.fogo.io');
+  for (const network of ['eclipse', 'solana:unknownchain00000000000000000000', '', undefined]) {
+    assert.throws(() => payRpcUrl({ network, livemode: true }), (e) => e instanceof MorselPayError && e.code === 'network');
+  }
+});
+
+test('the wallet is asked to sign for the checkout’s network, whatever network the page is on', async () => {
+  const { fetch } = api([checkout({ network: 'cookie' }), checkout({ network: 'cookie', status: 'paid', signature: 's' })]);
+  let seen = null;
+  const wallet = { publicKey: payer.publicKey, connected: true, sendTransaction: async (tx, connection, options) => { seen = { endpoint: connection.rpcEndpoint, options }; return 's'; } };
+  await morselPay({ checkout: ID, wallet, fetch, pollMs: 500 });
+  assert.deepEqual(seen, { endpoint: 'https://rpc.cookiescan.io', options: { skipPreflight: false, chain: 'solana:9wDaBRDgArEUpvhHxGguNkwozsZh4UpG' } });
+  await assert.rejects(
+    morselPay({ checkout: ID, wallet, fetch: api([checkout({ network: 'eclipse' })]).fetch }),
+    (e) => e instanceof MorselPayError && e.code === 'network' && /does not know/.test(e.message)
+  );
 });
 
 test('a connected wallet pays in the page; resolves only once the API says paid', async () => {

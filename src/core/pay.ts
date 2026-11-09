@@ -16,7 +16,7 @@
  * whose `code` says why (expired, closed, rejected, not_found, aborted, timeout, network).
  */
 import { Connection, Transaction, VersionedTransaction, type PublicKey, type SendOptions } from '@solana/web3.js';
-import { COOKIE_CHAIN } from './chains';
+import { svmChain, type SvmChain } from './chains';
 import { fromBase64 } from './base64';
 
 export const MORSEL_PAY_API = 'https://api.dumpsack.xyz';
@@ -37,7 +37,8 @@ export interface MorselCheckout {
   id: string;
   status: 'open' | 'paid' | 'expired' | 'canceled';
   livemode: boolean;
-  network: 'solana' | 'cookie';
+  /** An SVM_CHAINS key: 'solana' or 'cookie' today; other networks as Morsel Pay adds them. */
+  network: 'solana' | 'cookie' | (string & {});
   token: string;
   mint: string | null;
   amount: string;
@@ -54,18 +55,22 @@ export interface MorselPayResult {
   id: string;
   status: 'paid';
   signature: string | null;
-  network: 'solana' | 'cookie';
+  network: MorselCheckout['network'];
   token: string;
   amount: string;
   /** How it was paid: from the connected wallet, or on the hosted checkout. */
   via: 'wallet' | 'page';
 }
 
-/** What `morselPay` needs of a wallet: this adapter's, or any Solana wallet adapter. */
+/**
+ * What `morselPay` needs of a wallet: this adapter's, or any Solana wallet adapter. The checkout's
+ * network goes along as `options.chain`: Morsel's adapters sign for it (whatever network the page is on);
+ * other adapters ignore the field.
+ */
 export interface MorselPayWallet {
   publicKey: PublicKey | null;
   connected?: boolean;
-  sendTransaction(transaction: Transaction | VersionedTransaction, connection: Connection, options?: SendOptions): Promise<string>;
+  sendTransaction(transaction: Transaction | VersionedTransaction, connection: Connection, options?: SendOptions & { chain?: string }): Promise<string>;
 }
 
 export interface MorselPayOptions {
@@ -104,10 +109,21 @@ export function checkoutIdOf(checkout: string): string | null {
 /** The hosted checkout page for an id. */
 export const morselCheckoutUrl = (id: string, origin = MORSEL_PAY_CHECKOUT) => `${origin.replace(/\/+$/, '')}/checkout/${id}`;
 
-/** The RPC a checkout's transaction is sent through. */
+/**
+ * The network a checkout is paid on, from SVM_CHAINS: its `network`, and in test mode Solana's devnet
+ * for Solana (other networks' test checkouts settle on the network itself, as Cookie Chain's always
+ * have). A network that SVM_CHAINS does not know is refused, never paid on Solana.
+ */
+export function payChainOf(c: Pick<MorselCheckout, 'network' | 'livemode'>): SvmChain {
+  const chain = svmChain(String(c.network || ''));
+  if (!chain) throw new MorselPayError('network', `Morsel Pay does not know the network "${String(c.network)}".`);
+  if (!c.livemode && chain.key === 'solana') return svmChain('solana-devnet')!;
+  return chain;
+}
+
+/** The RPC a checkout's transaction is sent through: its network's public endpoint (see payChainOf). */
 export function payRpcUrl(c: Pick<MorselCheckout, 'network' | 'livemode'>): string {
-  if (c.network === 'cookie') return COOKIE_CHAIN.rpcUrl;
-  return c.livemode ? 'https://api.mainnet-beta.solana.com' : 'https://api.devnet.solana.com';
+  return payChainOf(c).rpcUrl;
 }
 
 const sleep = (ms: number, signal?: AbortSignal) => new Promise<void>((resolve, reject) => {
@@ -180,6 +196,8 @@ export async function morselPay(o: MorselPayOptions): Promise<MorselPayResult> {
   const useWallet = o.mode === 'wallet' || (o.mode !== 'page' && !!wallet);
   if (useWallet) {
     if (!wallet) throw new MorselPayError('rejected', 'Connect a wallet to pay.');
+    // The network it is paid on, before anything is asked for: an unknown one is refused here.
+    const chain = payChainOf(first);
     emit('signing', first);
     let txB64: string;
     try {
@@ -204,7 +222,7 @@ export async function morselPay(o: MorselPayOptions): Promise<MorselPayResult> {
     let tx: Transaction | VersionedTransaction;
     try { tx = Transaction.from(bytes); } catch { tx = VersionedTransaction.deserialize(bytes); }
     try {
-      await wallet.sendTransaction(tx, new Connection(o.rpcUrl || payRpcUrl(first), 'confirmed'), { skipPreflight: false });
+      await wallet.sendTransaction(tx, new Connection(o.rpcUrl || chain.rpcUrl, 'confirmed'), { skipPreflight: false, chain: chain.id });
     } catch (e) {
       if (isRejection(e)) throw new MorselPayError('rejected', 'The payment was not approved in the wallet.', e);
       throw new MorselPayError('network', 'The wallet could not send the payment.', e);
