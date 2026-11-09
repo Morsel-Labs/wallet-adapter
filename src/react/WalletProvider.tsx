@@ -1,11 +1,15 @@
-﻿import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+﻿import React, { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef } from 'react';
 import { getWallets } from '@wallet-standard/app';
-import { MorselCookieWalletAdapter, WalletReadyState, WalletAdapterError, CookieWalletAdapter, StandardWalletAdapter } from '../core';
+import { MorselWalletAdapter, WalletReadyState, WalletAdapterError, CookieWalletAdapter, StandardWalletAdapter } from '../core';
+import { connectionFor, resolveSvmChain, type SvmChain } from '../core/chains';
 import { WalletContext } from './WalletContext';
+import { ChainContext, type ChainContextState } from './ChainContext';
+import { chainPropId as idOf, nextChain, offeredChains, rpcUrlFor } from './chain-state';
 import { WalletProviderProps, WalletContextState } from './types';
 import { MORSEL_WALLET_AUTO_CONNECT_KEY } from './constants';
 
 const isBrowser = typeof window !== 'undefined';
+const useIsoLayoutEffect = isBrowser ? useLayoutEffect : useEffect;
 
 function getAutoConnect(): boolean {
   if (!isBrowser) return false;
@@ -38,7 +42,56 @@ function isSolanaWallet(wallet: any): boolean {
   );
 }
 
-export function WalletProvider({ children, adapter: providedAdapter, adapters: providedAdapters, autoConnect = false, onError }: WalletProviderProps) {
+export function WalletProvider({
+  children,
+  adapter: providedAdapter,
+  adapters: providedAdapters,
+  autoConnect = false,
+  onError,
+  chain: chainProp,
+  chains: chainsProp,
+  rpcUrl,
+  onChainChange,
+}: WalletProviderProps) {
+  // ---- the app's network --------------------------------------------------------------------------
+  // An unknown network throws here: it is a mistake in the app, and must never be signed for as Solana.
+  const propId = idOf(chainProp);
+  const home = useMemo(() => resolveSvmChain(chainProp ?? 'solana'), [propId]); // eslint-disable-line react-hooks/exhaustive-deps
+  const chainsKey = (chainsProp ?? []).map(idOf).join('|');
+  const offered = useMemo(() => (chainsProp ? chainsProp.map(resolveSvmChain) : null), [chainsKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [chain, setChainState] = useState<SvmChain>(home);
+  const lastHome = useRef(home);
+  if (lastHome.current !== home) {
+    // A new `chain` prop moves the app (derived state, set during render).
+    lastHome.current = home;
+    if (chain.id !== home.id) setChainState(home);
+  }
+  const chains = useMemo(() => offeredChains(offered, chain), [offered, chain]);
+
+  const setChain = useCallback(
+    (key: string) => {
+      const next = nextChain(offered, key);
+      setChainState((prev) => (prev.id === next.id ? prev : next));
+    },
+    [offered]
+  );
+
+  const chainRpc = rpcUrlFor(rpcUrl, chain, home);
+  const connection = useMemo(() => connectionFor(chain, chainRpc), [chain, chainRpc]);
+  const chainRef = useRef(chain);
+  chainRef.current = chain;
+
+  const onChainChangeRef = useRef(onChainChange);
+  onChainChangeRef.current = onChainChange;
+  const firstChain = useRef(true);
+  useEffect(() => {
+    if (firstChain.current) {
+      firstChain.current = false;
+      return;
+    }
+    onChainChangeRef.current?.(chain);
+  }, [chain]);
+
   const [standardAdapters, setStandardAdapters] = useState<CookieWalletAdapter[]>([]);
   const standardAdaptersMapRef = useRef<Map<string, StandardWalletAdapter>>(new Map());
 
@@ -53,7 +106,7 @@ export function WalletProvider({ children, adapter: providedAdapter, adapters: p
       for (const wallet of wallets) {
         const key = String(wallet.name ?? '').toLowerCase();
         if (!key || !isSolanaWallet(wallet) || adapterMap.has(key)) continue;
-        adapterMap.set(key, new StandardWalletAdapter(wallet));
+        adapterMap.set(key, new StandardWalletAdapter(wallet, chainRef.current));
         changed = true;
       }
       if (changed) setStandardAdapters([...adapterMap.values()]);
@@ -84,7 +137,7 @@ export function WalletProvider({ children, adapter: providedAdapter, adapters: p
   const adapters = useMemo(() => {
     const staticAdapters = providedAdapters && providedAdapters.length > 0
       ? providedAdapters
-      : [providedAdapter || new MorselCookieWalletAdapter()];
+      : [providedAdapter || new MorselWalletAdapter({ chain: chainRef.current })];
     const staticNames = new Set(staticAdapters.map(a => a.name.toLowerCase()));
     const deduped = standardAdapters.filter(a => {
       const aName = a.name.toLowerCase();
@@ -92,6 +145,17 @@ export function WalletProvider({ children, adapter: providedAdapter, adapters: p
     });
     return [...staticAdapters, ...deduped];
   }, [providedAdapter, providedAdapters, standardAdapters]);
+
+  // Every adapter signs for the app's network (and sends through its RPC when it has to send itself).
+  useIsoLayoutEffect(() => {
+    for (const a of adapters) {
+      try {
+        a.setChain?.(chain, chainRpc);
+      } catch {
+        /* an adapter that cannot take this network refuses at signing time */
+      }
+    }
+  }, [adapters, chain, chainRpc]);
 
   const [activeAdapterIndex, setActiveAdapterIndex] = useState(0);
   const activeAdapter = adapters[activeAdapterIndex];
@@ -228,6 +292,17 @@ export function WalletProvider({ children, adapter: providedAdapter, adapters: p
     [activeAdapter]
   );
 
+  const signAndSendTransaction = useCallback(
+    (...args: Parameters<WalletContextState['signAndSendTransaction']>) => {
+      const [transaction, options] = args;
+      if (activeAdapter.signAndSendTransaction) return activeAdapter.signAndSendTransaction(transaction, options);
+      // An adapter from elsewhere: it signs, the app's connection sends.
+      const target = options?.chain ? connectionFor(options.chain) : connection;
+      return activeAdapter.sendTransaction(transaction, target, options);
+    },
+    [activeAdapter, connection]
+  );
+
   const refreshProvider = useCallback(() => {
     if ('refreshProvider' in activeAdapter && typeof (activeAdapter as { refreshProvider: () => void }).refreshProvider === 'function') {
       (activeAdapter as { refreshProvider: () => void }).refreshProvider();
@@ -256,11 +331,18 @@ export function WalletProvider({ children, adapter: providedAdapter, adapters: p
     signAllTransactions,
     signMessage,
     sendTransaction,
+    signAndSendTransaction,
     refreshProvider,
     clearError,
     on: activeAdapter.on.bind(activeAdapter),
     off: activeAdapter.off.bind(activeAdapter),
   };
 
-  return <WalletContext.Provider value={contextValue}>{children}</WalletContext.Provider>;
+  const chainValue = useMemo<ChainContextState>(() => ({ chain, chains, setChain, connection }), [chain, chains, setChain, connection]);
+
+  return (
+    <ChainContext.Provider value={chainValue}>
+      <WalletContext.Provider value={contextValue}>{children}</WalletContext.Provider>
+    </ChainContext.Provider>
+  );
 }

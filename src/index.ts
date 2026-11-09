@@ -4,7 +4,10 @@ export * from './core';
 // React
 export { WalletProvider } from './react/WalletProvider';
 export { useWallet } from './react/useWallet';
+export { useChain, useOptionalChain } from './react/useChain';
 export { WalletContext } from './react/WalletContext';
+export { ChainContext } from './react/ChainContext';
+export type { ChainContextState } from './react/ChainContext';
 export * from './react/types';
 export * from './react/constants';
 export * from './react/hooks';

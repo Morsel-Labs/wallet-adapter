@@ -1,17 +1,29 @@
 ﻿import { useState, useEffect, useCallback, useRef } from 'react';
-import { Connection, LAMPORTS_PER_SOL, Commitment } from '@solana/web3.js';
+import { Connection, Commitment } from '@solana/web3.js';
 import { useWallet } from '../useWallet';
+import { useOptionalChain } from '../useChain';
 
 interface UseWalletBalanceOptions {
   autoFetch?: boolean;
   commitment?: Commitment;
 }
 
+/**
+ * The connected account's native balance on the app's network.
+ *
+ * `connection`: leave it out for useChain().connection (the app's network); pass one to read
+ * elsewhere, or `null` to read nothing. `balance` is in the network's gas token (`symbol`).
+ */
 export function useWalletBalance(
-  connection: Connection | null | undefined,
+  connection?: Connection | null,
   options: UseWalletBalanceOptions = {}
 ) {
   const { publicKey } = useWallet();
+  const chainState = useOptionalChain();
+  if (connection === undefined) connection = chainState?.connection ?? null;
+  const decimals = chainState?.chain.native.decimals ?? 9;
+  const symbol = chainState?.chain.native.symbol ?? null;
+  const unit = 10 ** decimals;
   const { autoFetch = true, commitment } = options;
 
   const [balance, setBalance] = useState<number | null>(null);
@@ -38,10 +50,10 @@ export function useWalletBalance(
       // Only update if this is still the latest request
       if (currentRequestId === requestIdRef.current) {
         setLamports(fetchedLamports);
-        setBalance(fetchedLamports / LAMPORTS_PER_SOL);
+        setBalance(fetchedLamports / unit);
       }
       
-      return fetchedLamports / LAMPORTS_PER_SOL;
+      return fetchedLamports / unit;
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
       
@@ -57,7 +69,7 @@ export function useWalletBalance(
         setLoading(false);
       }
     }
-  }, [publicKey, connection, commitment]);
+  }, [publicKey, connection, commitment, unit]);
 
   const refetch = useCallback(async (): Promise<number | null> => {
     return fetchBalance();
@@ -66,6 +78,12 @@ export function useWalletBalance(
   const clearError = useCallback(() => {
     setError(null);
   }, []);
+
+  // Another network or account: the old figure is not this one's.
+  useEffect(() => {
+    setBalance(null);
+    setLamports(null);
+  }, [connection, publicKey]);
 
   useEffect(() => {
     if (autoFetch) {
@@ -82,6 +100,8 @@ export function useWalletBalance(
 
   return {
     balance,
+    /** The gas token's symbol on the app's network ('FOGO'); null outside a WalletProvider. */
+    symbol,
     lamports,
     loading,
     error,
