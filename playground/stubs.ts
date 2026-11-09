@@ -193,16 +193,16 @@ function monogram(bg: string, fg: string, letter: string) {
   );
 }
 
-function makeStandardWallet(name: string, bg: string, fg: string) {
+function makeStandardWallet(name: string, bg: string, fg: string, chains: string[]) {
   const kp = keyFor(name);
   const address = bs58.encode(kp.publicKey);
-  const account = { address, publicKey: kp.publicKey, chains: ['solana:mainnet'], features: ['solana:signTransaction', 'solana:signMessage'] };
+  const account = { address, publicKey: kp.publicKey, chains, features: ['solana:signTransaction', 'solana:signMessage'] };
   const listeners = new Set<(p: unknown) => void>();
   const wallet: any = {
     version: '1.0.0',
     name,
     icon: monogram(bg, fg, name[0]),
-    chains: ['solana:mainnet', 'solana:devnet'],
+    chains,
     accounts: [] as unknown[],
     features: {
       'standard:connect': {
@@ -260,11 +260,15 @@ function registerStandard(wallet: unknown) {
   window.addEventListener('wallet-standard:app-ready', ((e: CustomEvent) => cb(e.detail)) as EventListener);
 }
 
-const WALLETS: Record<string, [string, string, string]> = {
-  phantom: ['Phantom', '#ab9ff2', '#1c1c3a'],
-  backpack: ['Backpack', '#e33e3f', '#ffffff'],
-  solflare: ['Solflare', '#fc7227', '#1b1b1b'],
-  glow: ['Glow', '#1d1d1f', '#c8f560'],
+// The networks each fake wallet advertises (like the real ones): Solana's older ids for most, and
+// Backpack's 33-character CAIP-2 ids for Solana and Fogo. On Cookie Chain, X1 or Solayer none of them
+// is offered, and the widget says Morsel supports it.
+const SOLANA_IDS = ['solana:mainnet', 'solana:devnet', 'solana:testnet'];
+const WALLETS: Record<string, [string, string, string, string[]]> = {
+  phantom: ['Phantom', '#ab9ff2', '#1c1c3a', SOLANA_IDS],
+  backpack: ['Backpack', '#e33e3f', '#ffffff', ['solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpK', 'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1w', 'solana:CDLtwKnaCoK157uaHQDj4fHu72AyD2519']],
+  solflare: ['Solflare', '#fc7227', '#1b1b1b', ['solana:mainnet', 'solana:devnet']],
+  glow: ['Glow', '#1d1d1f', '#c8f560', ['solana:mainnet', 'solana:9qoRTAHGWBZHYzMJGkt62wBbFRASj6H7']],
 };
 const list = (params.get('wallets') ?? 'phantom,backpack,solflare,glow').split(',').filter(Boolean);
 for (const id of list) {
@@ -307,7 +311,7 @@ export const notInstalled =
         new NotInstalledAdapter('Coinbase Wallet', 'https://www.coinbase.com/wallet', monogram('#0052ff', '#fff', 'C')),
       ];
 
-/** A Connection stand-in so the account chip can show a balance. */
+/** A Connection stand-in so the account chip can show a balance (nothing is read from a network). */
 export const fakeConnection: any = {
   async getBalance() {
     await delay(150);

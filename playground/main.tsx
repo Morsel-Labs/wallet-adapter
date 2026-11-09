@@ -6,11 +6,17 @@ import {
   WalletModalProvider,
   WalletModal,
   ConnectButton,
-  MorselCookieWalletAdapter,
+  MorselWalletAdapter,
+  SVM_CHAINS,
+  svmChain,
+  useChain,
   useWalletModal,
   useWallet,
   type CookieWalletAdapter,
 } from '../src';
+
+// The networks the demo offers: every mainnet, and Solana Devnet.
+const CHAINS = SVM_CHAINS.filter((c) => !c.testnet || c.key === 'solana-devnet').map((c) => c.key);
 
 const params = new URLSearchParams(location.search);
 const shot = params.get('shot') === '1';
@@ -19,14 +25,17 @@ type Theme = 'light' | 'dark' | 'system';
 function Bridge() {
   const modal = useWalletModal();
   const wallet = useWallet();
+  const chain = useChain();
   mw.modal = modal;
   mw.wallet = wallet;
+  mw.chain = chain;
   return null;
 }
 
 function Page({ theme }: { theme: 'light' | 'dark' }) {
   const modal = useWalletModal();
   const { connected } = useWallet();
+  const { chain } = useChain();
   return (
     <div className={`demo demo-${theme}`}>
       <header className="demo-head">
@@ -47,7 +56,10 @@ function Page({ theme }: { theme: 'light' | 'dark' }) {
         <section className="demo-card">
           <div className="demo-card-head">
             <b>Swap</b>
-            <span>Cookie Chain</span>
+            <span className="demo-net">
+              <img src={chain.icon} alt="" width={16} height={16} />
+              {chain.name}
+            </span>
           </div>
           <div className="demo-field">
             <small>You pay</small>
@@ -55,7 +67,7 @@ function Page({ theme }: { theme: 'light' | 'dark' }) {
               <span className="demo-amt">250</span>
               <span className="demo-token">
                 <i style={{ background: 'linear-gradient(135deg,#ffd27a,#e89b2c)' }} />
-                COOK
+                {chain.native.symbol}
               </span>
             </div>
           </div>
@@ -64,8 +76,8 @@ function Page({ theme }: { theme: 'light' | 'dark' }) {
             <div>
               <span className="demo-amt muted">41.82</span>
               <span className="demo-token">
-                <i style={{ background: 'linear-gradient(135deg,#9945ff,#14f195)' }} />
-                SOL
+                <i style={{ background: 'linear-gradient(135deg,#2775ca,#5aa0ef)' }} />
+                USDC
               </span>
             </div>
           </div>
@@ -80,6 +92,7 @@ function Page({ theme }: { theme: 'light' | 'dark' }) {
 
 function Controls({ theme, setTheme }: { theme: Theme; setTheme: (t: Theme) => void }) {
   const modal = useWalletModal();
+  const { chain, chains, setChain } = useChain();
   const [, force] = useState(0);
   useEffect(() => {
     const id = setInterval(() => force((n) => n + 1), 500);
@@ -99,6 +112,14 @@ function Controls({ theme, setTheme }: { theme: Theme; setTheme: (t: Theme) => v
         {(['light', 'dark', 'system'] as Theme[]).map((t) => (
           <button key={t} aria-pressed={theme === t} onClick={() => setTheme(t)}>
             {t}
+          </button>
+        ))}
+      </div>
+      <div>
+        Network:{' '}
+        {chains.map((c) => (
+          <button key={c.key} aria-pressed={chain.key === c.key} onClick={() => setChain(c.key)}>
+            {c.name}
           </button>
         ))}
       </div>
@@ -150,14 +171,24 @@ function App() {
     return () => m.removeEventListener('change', f);
   }, []);
   const resolved = theme === 'system' ? (dark ? 'dark' : 'light') : theme;
-  const morsel = useMemo(() => new MorselCookieWalletAdapter(), []);
+  const morsel = useMemo(() => new MorselWalletAdapter(), []);
   mw.morsel = morsel;
   const adapters = useMemo(() => [morsel as CookieWalletAdapter, ...(notInstalled as unknown as CookieWalletAdapter[])], [morsel]);
   useEffect(() => {
     document.documentElement.dataset.theme = resolved;
   }, [resolved]);
   return (
-    <WalletProvider adapters={adapters}>
+    <WalletProvider
+      adapters={adapters}
+      chain={svmChain(params.get('chain') || '') ? params.get('chain')! : 'solana'}
+      chains={CHAINS}
+      onChainChange={(c) => {
+        // Keep the network in the URL, so a reload (or a screenshot run) lands on it.
+        const p = new URLSearchParams(location.search);
+        p.set('chain', c.key);
+        history.replaceState(null, '', `?${p}`);
+      }}
+    >
       <WalletModalProvider>
         <Bridge />
         <Page theme={resolved} />
