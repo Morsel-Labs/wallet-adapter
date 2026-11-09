@@ -477,3 +477,78 @@ test('disconnect() ends the paired session and leaves the relay idle until a QR 
   assert.equal(FakeWebSocket.instances.length, sockets + 1);
   adapter.destroy();
 });
+
+// ---- the network, as optional metadata the Morsel app does not need ---------------------------------
+
+test('with a network set, the proposal and each request carry it as `chain`; without one, nothing changes', async () => {
+  const FOGO = 'solana:CDLtwKnaCoK157uaHQDj4fHu72AyD251';
+  {
+    const adapter = new MorselCookieWalletAdapter({ chain: 'fogo' });
+    adapter.startRelaySession();
+    const ws = lastSocket();
+    const phone = new Phone(adapter.wcUri);
+    phone.hello(ws);
+    const proposal = phone.inbox(ws).find((m) => m.type === 'session_proposal');
+    assert.deepEqual(proposal.metadata, { name: 'Test dApp', icon: 'https://dapp.test/favicon.ico', origin: 'https://dapp.test', chain: FOGO });
+    phone.approve(ws);
+    assert.equal(adapter.connected, true, 'the approve proof is unchanged by it');
+
+    const from = new PublicKey(phone.address);
+    const p = adapter.signTransaction(legacyTx(from));
+    await tick();
+    const req = phone.inbox(ws).filter((m) => m.type === 'sign_transaction').pop();
+    assert.equal(req.chain, FOGO);
+    // The phone signs the request it received; the result is still bound to it (0.3).
+    const asked = Transaction.from(fromBase64(req.transaction));
+    asked.partialSign(Keypair.fromSecretKey(phone.sign.secretKey));
+    phone.send(ws, { type: 'sign_result', id: req.id, transaction: toBase64(wire(asked)) });
+    assert.equal((await p).verifySignatures(), true);
+
+    const m = adapter.signMessage(new TextEncoder().encode('hi'));
+    await tick();
+    assert.equal(phone.inbox(ws).filter((x) => x.type === 'sign_message').pop().chain, FOGO);
+    phone.send(ws, { type: 'sign_reject', id: phone.inbox(ws).filter((x) => x.type === 'sign_message').pop().id });
+    await assert.rejects(m);
+
+    adapter.setChain('x1');
+    const p2 = adapter.signTransaction(legacyTx(from));
+    p2.catch(() => {});
+    await tick();
+    assert.equal(phone.inbox(ws).filter((x) => x.type === 'sign_transaction').pop().chain, 'solana:4SvBP3omtvcCVWdxq1zBY5cDp4wndjsT');
+    adapter.destroy();
+  }
+  {
+    const { adapter, ws, phone } = connectedPair();
+    const proposal = phone.inbox(ws).find((m) => m.type === 'session_proposal');
+    assert.equal('chain' in proposal.metadata, false);
+    const p = adapter.signTransaction(legacyTx(new PublicKey(phone.address)));
+    p.catch(() => {});
+    await tick();
+    assert.equal('chain' in phone.inbox(ws).filter((x) => x.type === 'sign_transaction').pop(), false);
+    adapter.destroy();
+  }
+});
+
+test('signAndSendTransaction (relay): sign_and_send_transaction with the network; the answer must be a signature', async () => {
+  const { adapter, ws, phone, errors } = connectedPair();
+  adapter.setChain('solayer');
+  const from = new PublicKey(phone.address);
+  const sig = nacl.randomBytes(64);
+  const p = adapter.signAndSendTransaction(legacyTx(from));
+  await tick();
+  const req = phone.inbox(ws).filter((m) => m.type === 'sign_and_send_transaction').pop();
+  assert.ok(req, 'asked over the relay');
+  assert.equal(req.chain, 'solayer:mainnet');
+  assert.equal(Transaction.from(fromBase64(req.transaction)).feePayer.toBase58(), phone.address, 'the transaction, as asked');
+  phone.send(ws, { type: 'sign_result', id: req.id, signature: bs58.encode(sig) });
+  assert.equal(await p, bs58.encode(sig));
+
+  const p2 = adapter.signAndSendTransaction(legacyTx(from), { chain: 'fogo' });
+  await tick();
+  const req2 = phone.inbox(ws).filter((m) => m.type === 'sign_and_send_transaction').pop();
+  assert.equal(req2.chain, 'solana:CDLtwKnaCoK157uaHQDj4fHu72AyD251', 'a request may name its own network');
+  phone.send(ws, { type: 'sign_result', id: req2.id, signature: 'zz' });
+  await assert.rejects(p2, /no valid signature/);
+  assert.equal(errors.length, 1);
+  adapter.destroy();
+});

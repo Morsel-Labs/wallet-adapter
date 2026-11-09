@@ -46,3 +46,17 @@ export class WalletSignMessageError extends WalletAdapterError {
     this.name = 'WalletSignMessageError';
   }
 }
+export class WalletSendTransactionError extends WalletAdapterError {
+  constructor(message: string = 'Failed to send transaction') {
+    super(message);
+    this.name = 'WalletSendTransactionError';
+  }
+}
+
+/** The wallet does not support the app's network (it does not advertise that chain). */
+export class WalletChainNotSupportedError extends WalletAdapterError {
+  constructor(message: string = 'The wallet does not support this network') {
+    super(message);
+    this.name = 'WalletChainNotSupportedError';
+  }
+}

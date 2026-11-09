@@ -1,4 +1,5 @@
-export { MorselCookieWalletAdapter } from './MorselCookieWalletAdapter';
+export { MorselWalletAdapter, MorselCookieWalletAdapter } from './MorselWalletAdapter';
+export type { MorselWalletAdapterOptions } from './MorselWalletAdapter';
 export {
   APPROVE_PROOF_DOMAIN,
   approveProofPayload,
@@ -8,7 +9,9 @@ export {
 } from './approve-proof';
 export type { ApproveProofInput } from './approve-proof';
 export { StandardWalletAdapter } from './StandardWalletAdapter';
-export { COOKIE_CHAIN } from './chains';
+export { SVM_CHAINS, svmChain, connectionFor, COOKIE_CHAIN } from './chains';
+export type { SvmChain } from './chains';
+export { walletSupportsChain } from './support';
 export * from './types';
 export * from './errors';
 export { detectMorselCookieProvider, detectStandardMorselProvider } from './detect';

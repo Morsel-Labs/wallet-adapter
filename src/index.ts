@@ -1,28 +1,5 @@
-// Core
-export { MorselCookieWalletAdapter } from './core/MorselCookieWalletAdapter';
-export {
-  APPROVE_PROOF_DOMAIN,
-  approveProofPayload,
-  verifyApproveProof,
-  verifySignedMessage,
-  relayPeerFingerprint,
-} from './core/approve-proof';
-export type { ApproveProofInput } from './core/approve-proof';
-export { StandardWalletAdapter } from './core/StandardWalletAdapter';
-export { COOKIE_CHAIN } from './core/chains';
-export * from './core/types';
-export * from './core/errors';
-export { detectMorselCookieProvider, detectStandardMorselProvider } from './core/detect';
-export * from './core/constants';
-export type { CookieWalletAdapter } from './core/CookieWalletAdapter';
-
-// Morsel Pay
-export {
-  morselPay, MorselPayError, checkoutIdOf, morselCheckoutUrl, payRpcUrl, MORSEL_PAY_API, MORSEL_PAY_CHECKOUT,
-} from './core/pay';
-export type {
-  MorselPayOptions, MorselPayResult, MorselPayStatus, MorselPayErrorCode, MorselPayWallet, MorselCheckout,
-} from './core/pay';
+// Core and Morsel Pay (also importable alone, without React, from '@morsel-wallet/adapter/core')
+export * from './core';
 
 // React
 export { WalletProvider } from './react/WalletProvider';

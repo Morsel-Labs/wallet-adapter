@@ -1,5 +1,6 @@
-import { PublicKey, Transaction, VersionedTransaction } from '@solana/web3.js';
+import { PublicKey, Transaction, VersionedTransaction, type SendOptions } from '@solana/web3.js';
 import { getWallets } from '@wallet-standard/app';
+import bs58 from 'bs58';
 import type { MorselCookieProvider } from './types';
 
 /**
@@ -17,6 +18,7 @@ const F_DISCONNECT = 'standard:disconnect';
 const F_EVENTS = 'standard:events';
 const F_SIGN_TX = 'solana:signTransaction';
 const F_SIGN_MSG = 'solana:signMessage';
+const F_SIGN_SEND = 'solana:signAndSendTransaction';
 
 type AnyWallet = any;
 type Listener = (publicKey: PublicKey | string | null) => void;
@@ -50,6 +52,7 @@ export function detectStandardMorselProvider(): MorselCookieProvider | null {
   return provider;
 }
 
+/** No network named (the adapter has no chain): the first 'solana:' chain the wallet lists (0.3 behaviour). */
 function solanaChain(wallet: AnyWallet, account: AnyWallet): string {
   const pick = (ids?: readonly string[]) => ids?.find((c) => c.startsWith('solana:'));
   return (
@@ -59,6 +62,12 @@ function solanaChain(wallet: AnyWallet, account: AnyWallet): string {
     wallet.chains?.[0] ??
     'solana:mainnet'
   );
+}
+
+function wireOf(transaction: Transaction | VersionedTransaction): Uint8Array {
+  return transaction instanceof VersionedTransaction
+    ? transaction.serialize()
+    : transaction.serialize({ requireAllSignatures: false, verifySignatures: false });
 }
 
 function wrapStandardWallet(wallet: AnyWallet): MorselCookieProvider {
@@ -96,24 +105,32 @@ function wrapStandardWallet(wallet: AnyWallet): MorselCookieProvider {
       }
       account = null;
     },
-    async signTransaction<T extends Transaction | VersionedTransaction>(transaction: T): Promise<T> {
+    // `network`: the chain id the adapter signs for; the wallet refuses a transaction for another one.
+    async signTransaction<T extends Transaction | VersionedTransaction>(transaction: T, network?: string): Promise<T> {
       if (!account) throw new Error('Morsel wallet is not connected');
       const isVersioned = transaction instanceof VersionedTransaction;
-      const bytes = isVersioned
-        ? (transaction as VersionedTransaction).serialize()
-        : (transaction as Transaction).serialize({ requireAllSignatures: false, verifySignatures: false });
       const [out] = await wallet.features[F_SIGN_TX].signTransaction({
-        transaction: bytes,
+        transaction: wireOf(transaction),
         account,
-        chain: solanaChain(wallet, account),
+        chain: network || solanaChain(wallet, account),
       });
       const signed = out.signedTransaction as Uint8Array;
       return (isVersioned ? VersionedTransaction.deserialize(signed) : Transaction.from(signed)) as T;
     },
-    async signAllTransactions<T extends Transaction | VersionedTransaction>(transactions: T[]): Promise<T[]> {
+    async signAllTransactions<T extends Transaction | VersionedTransaction>(transactions: T[], network?: string): Promise<T[]> {
       const out: T[] = [];
-      for (const tx of transactions) out.push(await provider.signTransaction(tx));
+      for (const tx of transactions) out.push(await provider.signTransaction(tx, network));
       return out;
+    },
+    async signAndSendTransaction(transaction: Transaction | VersionedTransaction, network?: string | SendOptions, options?: SendOptions) {
+      if (!account) throw new Error('Morsel wallet is not connected');
+      const feature = wallet.features[F_SIGN_SEND];
+      if (!feature) throw new Error('Morsel wallet does not support solana:signAndSendTransaction');
+      const chain = typeof network === 'string' && network ? network : solanaChain(wallet, account);
+      const opts = typeof network === 'object' && network ? network : options;
+      const [out] = await feature.signAndSendTransaction({ transaction: wireOf(transaction), account, chain, options: opts });
+      const sig = out?.signature;
+      return { signature: sig instanceof Uint8Array ? bs58.encode(sig) : String(sig ?? '') };
     },
     async signMessage(message: Uint8Array) {
       if (!account) throw new Error('Morsel wallet is not connected');

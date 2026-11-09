@@ -2,8 +2,9 @@ import { PublicKey, Transaction, VersionedTransaction, Connection, SendOptions, 
 import EventEmitter from 'eventemitter3';
 import nacl from 'tweetnacl';
 import bs58 from 'bs58';
-import { MorselCookieProvider, WalletReadyState, SignedMessageResponse, MorselRelayStatus } from './types';
-import { WalletAdapterError, WalletNotFoundError, WalletNotConnectedError, WalletConnectionError, WalletDisconnectionError, WalletSignTransactionError, WalletSignMessageError } from './errors';
+import { MorselCookieProvider, WalletReadyState, SignedMessageResponse, MorselRelayStatus, ChainSendOptions } from './types';
+import { WalletAdapterError, WalletNotFoundError, WalletNotConnectedError, WalletConnectionError, WalletDisconnectionError, WalletSignTransactionError, WalletSignMessageError, WalletSendTransactionError } from './errors';
+import { connectionFor, resolveSvmChain, type SvmChain } from './chains';
 import { detectMorselCookieProvider, detectStandardMorselProvider } from './detect';
 import { MORSEL_COOKIE_WALLET_NAME, MORSEL_COOKIE_WALLET_URL, MORSEL_COOKIE_WALLET_ICON, morselBrowseLink } from './constants';
 import { CookieWalletAdapter } from './CookieWalletAdapter';
@@ -97,6 +98,15 @@ function bytesField(value: unknown): Uint8Array | null {
   return null;
 }
 
+/** A sign-and-send answer's signature: 64 bytes, base58. */
+function signatureOf(value: unknown): string {
+  let bytes: Uint8Array | null = null;
+  if (typeof value === 'string') {
+    try { bytes = bs58.decode(value); } catch { bytes = null; }
+  } else if (value instanceof Uint8Array) bytes = value;
+  if (!bytes || bytes.length !== 64) throw new WalletSendTransactionError('The wallet returned no valid signature');
+  return bs58.encode(bytes);
+}
 
 type PendingRequest = {
   resolve: (v: any) => void;
@@ -127,6 +137,11 @@ export class MorselRelaySession {
   closed = false;
   /** Fingerprint of the paired wallet's channel key, once approved (see relayPeerFingerprint). */
   peerFingerprint: string | null = null;
+  /**
+   * The chain id the dApp is on, sent as optional metadata (`chain`) with the proposal and each request.
+   * The Morsel app ignores it today: it proves which network a transaction belongs to by itself.
+   */
+  chainId: string | null = null;
 
   private keyPair: nacl.BoxKeyPair;
   private ws: WebSocket | null = null;
@@ -172,7 +187,8 @@ export class MorselRelaySession {
         const origin = typeof window !== 'undefined' ? window.location.origin : '';
         const name = typeof document !== 'undefined' ? (document.title || window.location.hostname) : 'dApp';
         const icon = origin ? `${origin}/favicon.ico` : '';
-        this._sendEncrypted({ type: 'session_proposal', id: this.proposalId, metadata: { name, icon, origin } });
+        const metadata = this.chainId ? { name, icon, origin, chain: this.chainId } : { name, icon, origin };
+        this._sendEncrypted({ type: 'session_proposal', id: this.proposalId, metadata });
 
       } else if (msg.type === 'enc' && this.walletPubKey) {
         try {
@@ -247,7 +263,8 @@ export class MorselRelaySession {
         reject(new Error('Request timed out'));
       }, timeoutMs);
       this.pendingRequests.set(id, { resolve, reject, timerId });
-      this._sendEncrypted(msg);
+      // A request may name its own network (`chain`); otherwise the session's goes along.
+      this._sendEncrypted(this.chainId ? { chain: this.chainId, ...msg } : msg);
     });
   }
 
@@ -299,7 +316,20 @@ function openInMorselApp(): boolean {
 }
 
 
-export class MorselCookieWalletAdapter extends EventEmitter<AdapterEvents> implements CookieWalletAdapter {
+export interface MorselWalletAdapterOptions {
+  /**
+   * The network the dApp is on: a key ('fogo'), a chain id, or an SvmChain. Every signature request
+   * names it to the wallet, which signs for that network and refuses a transaction for another one.
+   * Unset: the wallet's own network applies (0.3 behaviour). WalletProvider sets it from its `chain`.
+   */
+  chain?: SvmChain | string;
+}
+
+/**
+ * Morsel on any SVM network: the injected extension / in-app browser provider, Morsel registered
+ * through the Wallet Standard, or the Morsel app over the encrypted QR relay (Morsel Connect).
+ */
+export class MorselWalletAdapter extends EventEmitter<AdapterEvents> implements CookieWalletAdapter {
   name = MORSEL_COOKIE_WALLET_NAME;
   url = MORSEL_COOKIE_WALLET_URL;
   icon = MORSEL_COOKIE_WALLET_ICON;
@@ -322,6 +352,10 @@ export class MorselCookieWalletAdapter extends EventEmitter<AdapterEvents> imple
    * the key the end-to-end encryption and the wallet's signed proof are bound to. Null otherwise.
    */
   relayPeerFingerprint: string | null = null;
+  /** The network requests are signed for (see {@link MorselWalletAdapterOptions.chain}). */
+  chain: SvmChain | null = null;
+  /** Your RPC for `chain`, used when a transaction has to be sent from the page (see signAndSendTransaction). */
+  rpcUrl: string | undefined = undefined;
 
   private provider: MorselCookieProvider | null = null;
   private connectPromise: Promise<void> | null = null;
@@ -334,14 +368,22 @@ export class MorselCookieWalletAdapter extends EventEmitter<AdapterEvents> imple
     this._handleAccountChanged((event as CustomEvent).detail);
   };
 
-  constructor() {
+  constructor(options: MorselWalletAdapterOptions = {}) {
     super();
+    if (options.chain) this.chain = resolveSvmChain(options.chain);
     this.autoDetect();
     // Browser only: on the server (SSR) a timer per render would leak and keep Node alive. The relay is
     // not contacted here: a session starts when the QR is asked for (nothing leaves the page before).
     if (typeof window !== 'undefined') this._startProviderPolling();
   }
 
+
+  /** Set the network requests are signed for. Throws for an unknown network (it is never taken for Solana). */
+  setChain(chain: SvmChain | string | null, rpcUrl?: string): void {
+    this.chain = chain ? resolveSvmChain(chain) : null;
+    this.rpcUrl = rpcUrl;
+    if (this.relaySession) this.relaySession.chainId = this.chain?.id ?? null;
+  }
 
   private _setRelayStatus(status: MorselRelayStatus): void {
     if (this.relayStatus === status) return;
@@ -387,6 +429,7 @@ export class MorselCookieWalletAdapter extends EventEmitter<AdapterEvents> imple
   private _startRelaySession(): void {
     this.relaySession?.end();
     const session = new MorselRelaySession();
+    session.chainId = this.chain?.id ?? null;
     this.relaySession = session;
     this.wcUri = session.uri;
     this.wcUriCreatedAt = Date.now();
@@ -617,11 +660,23 @@ export class MorselCookieWalletAdapter extends EventEmitter<AdapterEvents> imple
 
 
   async signTransaction(transaction: Transaction | VersionedTransaction): Promise<Transaction | VersionedTransaction> {
+    return this._signFor(transaction, this.chain);
+  }
+
+  /** The chain id to name to the wallet, or undefined (none set: the wallet's own network). */
+  private static _idOf(chain: SvmChain | null): string | undefined {
+    return chain?.id;
+  }
+
+  private async _signFor(transaction: Transaction | VersionedTransaction, chain: SvmChain | null): Promise<Transaction | VersionedTransaction> {
+    const network = MorselWalletAdapter._idOf(chain);
     if (this.provider) {
       if (!this.connected) throw new WalletNotConnectedError();
       try {
         const requestBytes = wireBytesOf(transaction);
-        const signed = await this.provider.signTransaction(transaction);
+        const signed = network === undefined
+          ? await this.provider.signTransaction(transaction)
+          : await this.provider.signTransaction(transaction, network);
         assertSignedMatches(requestBytes, wireBytesOf(signed), this.publicKey);
         return signed;
       } catch (error) {
@@ -637,7 +692,7 @@ export class MorselCookieWalletAdapter extends EventEmitter<AdapterEvents> imple
         const bytes = wireBytesOf(transaction);
         const id = generateRequestId();
         const result = await this.relaySession.sendRequest(
-          { type: 'sign_transaction', id, transaction: toBase64(bytes) },
+          { type: 'sign_transaction', id, transaction: toBase64(bytes), ...(network ? { chain: network } : {}) },
           60_000
         );
         if (typeof result?.transaction !== 'string') throw new WalletSignTransactionError('The wallet returned no transaction');
@@ -660,7 +715,10 @@ export class MorselCookieWalletAdapter extends EventEmitter<AdapterEvents> imple
     if (this.provider?.signAllTransactions) {
       try {
         const requestBytes = transactions.map(wireBytesOf);
-        const signed = await this.provider.signAllTransactions(transactions);
+        const network = MorselWalletAdapter._idOf(this.chain);
+        const signed = network === undefined
+          ? await this.provider.signAllTransactions(transactions)
+          : await this.provider.signAllTransactions(transactions, network);
         if (!Array.isArray(signed) || signed.length !== transactions.length) {
           throw new WalletSignTransactionError('The wallet returned a different number of transactions');
         }
@@ -734,13 +792,70 @@ export class MorselCookieWalletAdapter extends EventEmitter<AdapterEvents> imple
     return envelope ? { signature, signedMessage: envelope } : { signature };
   }
 
+  /**
+   * Signs for the adapter's network (or `options.chain`), then sends through your `connection`. Pass a
+   * connection to that same network (useChain().connection, or connectionFor(chain)).
+   */
   async sendTransaction(
     transaction: Transaction | VersionedTransaction,
     connection: Connection,
-    options?: SendOptions
+    options?: ChainSendOptions
   ): Promise<TransactionSignature> {
-    const signed = await this.signTransaction(transaction);
-    return await connection.sendRawTransaction(signed.serialize(), options);
+    const { chain, ...send } = options ?? {};
+    const signed = await this._signFor(transaction, chain ? resolveSvmChain(chain) : this.chain);
+    return await connection.sendRawTransaction(signed.serialize(), send as SendOptions);
+  }
+
+  /**
+   * Morsel signs and broadcasts on the adapter's network (or `options.chain`) through its own,
+   * genesis-checked node: the injected provider's signAndSendTransaction, or `sign_and_send_transaction`
+   * over the relay. With neither, the transaction is signed and sent through the network's public
+   * endpoint. Resolves with the signature (base58).
+   */
+  async signAndSendTransaction(transaction: Transaction | VersionedTransaction, options?: ChainSendOptions): Promise<TransactionSignature> {
+    const { chain: override, ...send } = options ?? {};
+    const chain = override ? resolveSvmChain(override) : this.chain;
+    const network = MorselWalletAdapter._idOf(chain);
+    const sendOptions = send as SendOptions;
+
+    if (this.provider?.signAndSendTransaction) {
+      if (!this.connected) throw new WalletNotConnectedError();
+      try {
+        const result = network === undefined
+          ? await this.provider.signAndSendTransaction(transaction, sendOptions)
+          : await this.provider.signAndSendTransaction(transaction, network, sendOptions);
+        return signatureOf(typeof result === 'string' ? result : result?.signature);
+      } catch (error) {
+        throw this._failSend(error);
+      }
+    }
+
+    if (!this.provider && this.relayConnected && this.relaySession) {
+      try {
+        const id = generateRequestId();
+        const result = await this.relaySession.sendRequest(
+          { type: 'sign_and_send_transaction', id, transaction: toBase64(wireBytesOf(transaction)), ...(network ? { chain: network } : {}) },
+          90_000
+        );
+        return signatureOf(result?.signature);
+      } catch (error) {
+        throw this._failSend(error);
+      }
+    }
+
+    if (!chain) throw this._failSend(new WalletSendTransactionError('No network to send on: set the adapter\'s chain'));
+    const signed = await this._signFor(transaction, chain);
+    try {
+      return await connectionFor(chain, chain.id === this.chain?.id ? this.rpcUrl : undefined).sendRawTransaction(signed.serialize(), sendOptions);
+    } catch (error) {
+      throw this._failSend(error);
+    }
+  }
+
+  private _failSend(error: unknown): WalletAdapterError {
+    const walletError = error instanceof WalletAdapterError ? error : new WalletSendTransactionError(error instanceof Error ? error.message : 'Unknown error');
+    this.emit('error', walletError);
+    return walletError;
   }
 
 
@@ -763,3 +878,6 @@ export class MorselCookieWalletAdapter extends EventEmitter<AdapterEvents> imple
     this.relayConnected = false;
   }
 }
+
+/** 0.1–0.3 name of {@link MorselWalletAdapter}; the same class. */
+export { MorselWalletAdapter as MorselCookieWalletAdapter };

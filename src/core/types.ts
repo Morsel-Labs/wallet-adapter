@@ -1,5 +1,7 @@
-import { PublicKey, Transaction, VersionedTransaction } from '@solana/web3.js';
+import { PublicKey, Transaction, VersionedTransaction, SendOptions } from '@solana/web3.js';
+import type { SvmChain } from './chains';
 
+/** The shape of COOKIE_CHAIN (kept from 0.1; new code uses SvmChain). */
 export interface CookieChainConfig {
   name: string;
   chainId: string;
@@ -15,8 +17,15 @@ export interface MorselCookieProvider {
   isConnected?: boolean;
   connect(): Promise<{ publicKey?: PublicKey | string } | PublicKey | string | void>;
   disconnect?(): Promise<void>;
-  signTransaction<T extends Transaction | VersionedTransaction>(transaction: T): Promise<T>;
-  signAllTransactions?<T extends Transaction | VersionedTransaction>(transactions: T[]): Promise<T[]>;
+  /** `network`: the chain id to sign for (the wallet refuses a transaction for another network). */
+  signTransaction<T extends Transaction | VersionedTransaction>(transaction: T, network?: string): Promise<T>;
+  signAllTransactions?<T extends Transaction | VersionedTransaction>(transactions: T[], network?: string): Promise<T[]>;
+  /** Sign and broadcast on `network` through the wallet's own node. */
+  signAndSendTransaction?(
+    transaction: Transaction | VersionedTransaction,
+    network?: string | SendOptions,
+    options?: SendOptions
+  ): Promise<{ signature: string } | string>;
   signMessage?(message: Uint8Array): Promise<Uint8Array | { signature: Uint8Array | number[] | string; signedMessage?: Uint8Array | number[] | string }>;
   on?(event: 'accountChanged', listener: (publicKey: PublicKey | string | null) => void): void;
   off?(event: 'accountChanged', listener: (publicKey: PublicKey | string | null) => void): void;
@@ -44,4 +53,13 @@ export interface SignedMessageResponse {
    * wallet). The signature is over these bytes: verify against them, not against the raw message.
    */
   signedMessage?: Uint8Array;
+}
+
+/** sendTransaction / signAndSendTransaction options: web3.js SendOptions, plus the network to sign for. */
+export interface ChainSendOptions extends SendOptions {
+  /**
+   * Sign for this network instead of the adapter's current one (a key, chain id, or SvmChain). The
+   * transaction must belong to it: the wallet refuses one built for another network.
+   */
+  chain?: SvmChain | string;
 }
