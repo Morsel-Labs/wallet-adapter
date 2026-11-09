@@ -1,13 +1,19 @@
 # @morsel-wallet/adapter
 
-Connect Cookie Chain and Solana dApps to Morsel Wallet. The package has three layers:
+Connect a wallet to a dApp on **any SVM network**: Solana, Cookie Chain, Fogo, Sonic SVM, X1 and Solayer.
+On the networks where Phantom and the others do not go, Morsel is the wallet; on Solana Morsel leads and
+every Wallet Standard wallet (Phantom, Backpack, Solflare, …) still works.
 
-- **Core** (`@morsel-wallet/adapter/core`, framework-agnostic): the Morsel adapter (injected
-  extension, Morsel's in-app browser, and the encrypted QR relay to the Morsel phone app), a Wallet
-  Standard adapter for every other wallet, and typed errors.
-- **React hooks**: `WalletProvider`, `useWallet` and friends.
-- **The Morsel connect widget**: a small, animated connect UI with Morsel as the hero, plus a styled
-  connect button that turns into an account chip.
+One prop says which network your app is on. The wallet is told that network on every signature, signs
+for it and refuses a transaction built for another one; a network the package does not know is refused
+too, never taken for Solana.
+
+- **Core** (`@morsel-wallet/adapter/core`, framework-agnostic): the network table (`SVM_CHAINS`), the
+  Morsel adapter (injected extension, Morsel's in-app browser, and Morsel Connect, the encrypted QR relay
+  to the Morsel phone app), a Wallet Standard adapter for every other wallet, Morsel Pay, typed errors.
+- **React**: `WalletProvider`, `useChain`, `useWallet` and friends.
+- **The Morsel connect widget**: a small, animated connect UI with Morsel as the hero, and a connect
+  button that turns into an account chip carrying the network's mark.
 
 ![The Morsel connect widget: wallet list, QR, Get Morsel card and the phone flow](docs/connect-widget.webp)
 
@@ -26,7 +32,7 @@ import { WalletProvider, WalletModalProvider, WalletModal, ConnectButton } from 
 
 export default function App() {
   return (
-    <WalletProvider>
+    <WalletProvider chain="fogo" autoConnect>
       <WalletModalProvider>
         <header>
           <ConnectButton />
@@ -39,14 +45,162 @@ export default function App() {
 }
 ```
 
-`WalletProvider` creates the Morsel adapter and discovers every installed Wallet Standard wallet
-(Phantom, Backpack, Solflare, ...) by itself. Pass `adapters={[...]}` to control the list.
+`WalletProvider` creates the Morsel adapter and discovers every installed Wallet Standard wallet by
+itself; the widget offers the ones that advertise your network. Pass `adapters={[...]}` to control the
+list. Without `chain` the app is on Solana.
+
+Then read and sign on that network:
+
+```tsx
+import { useChain, useWallet } from '@morsel-wallet/adapter';
+
+const { chain, connection } = useChain();            // chain.name 'Fogo', a Connection to Fogo
+const { publicKey, signAndSendTransaction } = useWallet();
+
+const signature = await signAndSendTransaction(tx);  // Morsel signs and sends it on Fogo
+console.log(chain.explorerTx(signature));
+```
+
+## Quick start per network
+
+Every network is one key away. What changes is the key, the gas token and which wallets are offered.
+
+**Solana**: Morsel first, then every Wallet Standard wallet that has Solana.
+
+```tsx
+<WalletProvider chain="solana">          {/* gas: SOL. Devnet: chain="solana-devnet" */}
+```
+
+**Cookie Chain**: Morsel's home network.
+
+```tsx
+<WalletProvider chain="cookie">          {/* gas: COOK */}
+```
+
+**Fogo**
+
+```tsx
+<WalletProvider chain="fogo">            {/* gas: FOGO. Testnet: chain="fogo-testnet" */}
+```
+
+**Sonic SVM** (the SVM network, not the EVM chain called Sonic)
+
+```tsx
+<WalletProvider chain="sonicsvm">        {/* gas: SOL */}
+```
+
+**X1**
+
+```tsx
+<WalletProvider chain="x1">              {/* gas: XNT */}
+```
+
+**Solayer** (InfiniSVM)
+
+```tsx
+<WalletProvider chain="solayer">         {/* gas: SOL; chain id solayer:mainnet */}
+```
+
+On a network where no other installed wallet is present, the widget says "Morsel supports Fogo" and
+offers Morsel (the extension, its in-app browser, or the phone by QR).
+
+Use your own RPC in production: the public endpoints below are rate limited.
+
+```tsx
+<WalletProvider chain="fogo" rpcUrl="https://your-fogo-node.example">
+```
+
+### The networks
+
+| key | name | chain id the wallet receives | gas | public RPC | explorer |
+|---|---|---|---|---|---|
+| `solana` | Solana | `solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp` | SOL | https://api.mainnet-beta.solana.com | solscan.io |
+| `cookie` | Cookie Chain | `solana:9wDaBRDgArEUpvhHxGguNkwozsZh4UpG` | COOK | https://rpc.cookiescan.io | cookiescan.io |
+| `fogo` | Fogo | `solana:CDLtwKnaCoK157uaHQDj4fHu72AyD251` | FOGO | https://mainnet.fogo.io | fogoscan.com |
+| `sonicsvm` | Sonic SVM | `solana:9qoRTAHGWBZHYzMJGkt62wBbFRASj6H7` | SOL | https://api.mainnet-alpha.sonic.game | explorer.sonicsvm.org |
+| `x1` | X1 | `solana:4SvBP3omtvcCVWdxq1zBY5cDp4wndjsT` | XNT | https://rpc.mainnet.x1.xyz | explorer.mainnet.x1.xyz |
+| `solayer` | Solayer | `solayer:mainnet` | SOL | https://mainnet-rpc.solayer.org | explorer.solayer.org |
+
+Test networks: `solana-devnet`, `solana-testnet`, `fogo-testnet`, `sonicsvm-testnet`, `x1-testnet`.
+
+A chain id is CAIP-2: `solana:` and the first 32 characters of the network's genesis hash. Solayer's
+node has no real genesis hash, so it is named `solayer:mainnet`. Every other id that names a network
+resolves too: the older Wallet Standard ids (`solana:mainnet`, `solana:devnet`, `gorbagana:testnet-v3`),
+Backpack's 33-character form, the full genesis hash, and names such as `fogo:mainnet`.
+
+```ts
+import { SVM_CHAINS, svmChain, connectionFor } from '@morsel-wallet/adapter/core';
+
+svmChain('fogo');                                      // the Fogo SvmChain
+svmChain('solana:mainnet')?.key;                       // 'solana'
+svmChain('solana:unknownchain00000000000000000000');   // null: unknown, never Solana
+connectionFor('x1');                                   // a Connection to X1's public RPC
+connectionFor('x1', 'https://your-x1-node.example', 'finalized');
+```
+
+Each `SvmChain` has `key`, `name`, `id`, `aliases`, `genesisHash`, `native` (`{ symbol, decimals }`),
+`rpcUrl`, `explorerUrl`, `explorerTx(signature)`, `explorerAddress(address)`, `testnet` and `icon` (a
+small SVG data URI of the network mark).
+
+## Several networks in one app
+
+```tsx
+<WalletProvider
+  chain="fogo"
+  chains={['fogo', 'solana', 'x1']}
+  rpcUrl={{ fogo: 'https://your-fogo-node.example', solana: 'https://your-solana-node.example' }}
+  onChainChange={(chain) => localStorage.setItem('network', chain.key)}
+>
+```
+
+```tsx
+const { chain, chains, setChain, connection } = useChain();
+setChain('solana');   // every adapter now signs for Solana; `connection` reads Solana
+```
+
+| Prop | Type | |
+|---|---|---|
+| `chain` | key, chain id or `SvmChain` | The app's network (default `'solana'`). A new value moves the app. |
+| `chains` | array of the same | The networks the app offers. `setChain` is limited to them; the widget shows a network picker when there is more than one. Without it, any known network. |
+| `rpcUrl` | string, `{ [key]: url }` or `(chain) => url` | Your RPC for reads (and for sends a wallet cannot do itself). A string is for the `chain` network only. |
+| `onChainChange` | `(chain) => void` | After every change of network. |
+
+An unknown network in `chain`, `chains` or `setChain` throws: it is a mistake in the app, and it is
+never signed for as Solana.
+
+## Signing on the right network
+
+Every signature request names the app's network to the wallet:
+
+- the Morsel extension and in-app browser get it as the provider's `network` argument;
+- Wallet Standard wallets (Morsel's registration and every other) get it as `chain`: the id of that
+  network the wallet advertises (Phantom is handed `solana:mainnet`, Morsel the CAIP-2 id);
+- over Morsel Connect, the phone checks which network the transaction belongs to itself; the chain id
+  rides along as optional metadata.
+
+The wallet signs for that network and refuses a transaction built for another one. A Wallet Standard
+wallet that does not advertise the network is refused before it is asked (`WalletChainNotSupportedError`,
+"Phantom does not support Fogo").
+
+```tsx
+const { signTransaction, sendTransaction, signAndSendTransaction } = useWallet();
+const { connection } = useChain();
+
+await signAndSendTransaction(tx);                        // the wallet signs and broadcasts on the app's network
+await sendTransaction(tx, connection);                   // the wallet signs; your connection sends
+await signAndSendTransaction(tx, { chain: 'solana' });  // one request on another network
+```
+
+`signAndSendTransaction` lets the wallet broadcast through its own node (Morsel's checks the node's
+genesis first); a wallet that cannot send itself signs, and the transaction goes out through the app's
+connection. `useWalletBalance()` reads the app's network: `{ balance, symbol, loading, error, refetch }`.
 
 ## The connect widget
 
 `<WalletModal />` renders the widget (it is the default `variant="compact"`). It is a 360 px card on
-desktop and a bottom sheet you can drag down to dismiss on phones. What it shows depends on where
-the user is:
+desktop and a bottom sheet you can drag down to dismiss on phones. Morsel is always first and works on
+every network; another wallet is listed only when it advertises the app's network. What happens when
+someone picks Morsel depends on where they are:
 
 | Where | What happens when they pick Morsel |
 |---|---|
@@ -55,10 +209,12 @@ the user is:
 | Phone browser | "Continue in Morsel": opens the page inside Morsel's browser through a universal link, where it connects in one tap. |
 | Inside Morsel's browser | No list at all: it connects straight away. |
 
-Other installed wallets are listed under Morsel ("Detected"); wallets that are not installed sit
-behind "More wallets". Declined requests, errors and expired QR codes each get their own screen with
-a retry. "New to Morsel? Get the app" opens a short Get Morsel card (platform links and, on desktop,
-a download QR).
+Other installed wallets that have the network are listed under Morsel ("Detected"); the rest sit behind
+"More wallets". When no other installed wallet has the network, the widget says "Morsel supports Fogo."
+and names the wallets that do not, yet. With more than one of `chains`, a compact network picker sits
+under the title: one button naming the current network, opening the list of the app's networks in place
+(arrow keys, Home/End, Esc back to the button). Declined requests, errors and expired QR codes each get
+their own screen with a retry. "New to Morsel? Get the app" opens a short Get Morsel card.
 
 The design is deliberately quiet: one accent action per screen, status screens with a single
 heading, and nothing that loops except loading indicators.
@@ -69,14 +225,14 @@ All props are optional.
 
 | Prop | Type | Default | |
 |---|---|---|---|
-| `variant` | `'compact' \| 'premium' \| 'headless'` | `'compact'` | `premium` is kept for compatibility and renders the widget. `headless` is the bare, unstyled list. |
+| `variant` | `'compact' \| 'premium' \| 'headless'` | `'compact'` | `premium` is kept for compatibility and renders the widget. `headless` is the bare, unstyled list (filtered by network too). |
 | `theme` | `'light' \| 'dark' \| 'system' \| 'auto'` | `'system'` | `system` follows the OS setting live. |
 | `accentColor` | CSS colour | Morsel blue | Same as setting `--mw-accent`. |
 | `placement` | `'center' \| 'anchor'` | `'center'` | `anchor` drops the widget down from the button that opened it (desktop). |
 | `title` | `string` | `'Connect a wallet'` | Title of the wallet list. |
 | `subtitle` | `string` | | Line under the title. |
 | `logo` | URL or node | | Your dApp's logo, next to the title. |
-| `networks`, `selectedNetworkId`, `onNetworkChange` | | | When `networks` has more than one entry, a small network switch is shown on the list. |
+| `networks`, `selectedNetworkId`, `onNetworkChange` | | | Your own network list for the picker, instead of `WalletProvider`'s `chains`. |
 | `connectLabel` | `string` | `'Connect'` | Label of the Morsel action. |
 | `installLabel` | `string` | `'Get'` | Label for wallets that are not installed. |
 | `closeLabel` | `string` | `'Close'` | Accessible name of the close button. |
@@ -93,18 +249,20 @@ All props are optional.
 ### ConnectButton
 
 Without `className` or `children`, `ConnectButton` is the styled Morsel button: an accent pill that
-opens the widget, then a compact account chip (avatar, wallet badge, short address and, when you pass
-a `connection`, the native balance) with a menu to copy the address, switch wallet or disconnect.
+opens the widget, then a compact account chip (avatar, wallet badge, the network's mark, short address
+and, when you pass a `connection`, the balance in the network's gas token) with a menu to copy the
+address, switch wallet or disconnect.
 
 ```tsx
-<ConnectButton connection={connection} balanceSymbol="COOK" theme="dark" />
+const { connection } = useChain();
+<ConnectButton connection={connection} theme="dark" />
 ```
 
 | Prop | Default | |
 |---|---|---|
 | `theme`, `accentColor` | `'system'` | As on the widget. |
 | `connection` | | A web3.js `Connection`; shows the balance in the chip. |
-| `balanceSymbol` | `'COOK'` | |
+| `balanceSymbol` | the network's gas token | |
 | `disconnectedLabel` | `'Connect wallet'` | |
 | `connectingLabel` | `'Connecting…'` | |
 | `showLogo` | `true` | The Morsel mark on the button. |
@@ -210,12 +368,31 @@ curl https://api.dumpsack.xyz/v1/pay/subscriptions \
 Send the customer to `url`. Webhooks: `customer.subscription.created` once it is set up, `invoice.paid`
 (with the payment) for every period, `customer.subscription.deleted` when it ends or is stopped.
 
+The checkout's network decides where it is paid (`payChainOf(checkout)`, from `SVM_CHAINS`): the wallet is
+asked to sign for that network even when your page is on another one. A network the table does not know
+is refused (`MorselPayError` with `code: 'network'`), never paid on Solana.
+
 ## Morsel adapter (core)
 
-```ts
-import { MorselCookieWalletAdapter } from '@morsel-wallet/adapter/core';
+Without React:
 
-const morsel = new MorselCookieWalletAdapter();
+```ts
+import { MorselWalletAdapter, connectionFor } from '@morsel-wallet/adapter/core';
+
+const morsel = new MorselWalletAdapter({ chain: 'fogo' });
+await morsel.connect();
+const signature = await morsel.signAndSendTransaction(tx);           // on Fogo
+await morsel.sendTransaction(tx, connectionFor('fogo'));             // signed for Fogo, sent by you
+morsel.setChain('x1');                                               // later requests are for X1
+```
+
+`MorselCookieWalletAdapter` is the same class under its 0.1–0.3 name. Built without a `chain`, the
+adapter passes no network, and the wallet signs for its own (0.3 behaviour). Every other wallet:
+`new StandardWalletAdapter(wallet, 'fogo')`.
+
+The QR relay (Morsel Connect):
+
+```ts
 morsel.startRelaySession();   // when your QR view opens: mints the pairing URI, opens the relay
 morsel.wcUri;                 // morsel://connect?... pairing URI for your own QR ('' until started)
 morsel.relayStatus;           // 'waiting' | 'scanned' | 'rejected' | 'connected' | 'idle'
@@ -229,7 +406,9 @@ morsel.relayPeerFingerprint;  // 'xxxx-xxxx' of the paired phone's channel key, 
 Constructing the adapter contacts nothing: the relay is opened when a QR is asked for (the widget's
 QR view, `startRelaySession()`, or a `connect()` that finds no Morsel on the page). The relay is
 end-to-end encrypted (NaCl box) between the page and the Morsel app; the relay server only forwards
-ciphertext.
+ciphertext. With a network set, the session proposal (`metadata.chain`) and each request (`chain`) carry
+its chain id as optional metadata; the Morsel app does not need it (it works out which network a
+transaction belongs to itself) and nothing in the approval proof depends on it.
 
 ### How the phone is authenticated
 
@@ -266,6 +445,7 @@ connected key (`signedMessage` is returned when a hardware wallet signed an enve
 ```tsx
 import {
   useWallet,
+  useChain,
   useWalletConnection,
   useWalletAddress,
   useSignMessage,
@@ -277,11 +457,25 @@ import {
   useOnDisconnect,
 } from '@morsel-wallet/adapter';
 
-const { connected, publicKey, connecting, adapters, connect, disconnect } = useWallet();
-const address = useWalletAddress(); // base58 string or null
+const { chain, chains, setChain, connection } = useChain();
+const { connected, publicKey, connecting, adapters, connect, disconnect, signAndSendTransaction } = useWallet();
+const { balance, symbol } = useWalletBalance();       // on the app's network
+const address = useWalletAddress();                   // base58 string or null
 const signMessage = useSignMessage();
 const { signature } = await signMessage(new TextEncoder().encode('hello'));
 ```
+
+## Upgrading from 0.3.x
+
+- `WalletProvider` without `chain` is on Solana, and every request now names it. 0.3 named no network,
+  so the Morsel extension signed with its Cookie Chain provider: **a Cookie Chain dApp adds
+  `chain="cookie"`.**
+- The widget lists another wallet only on a network it advertises (in 0.3 it listed every wallet). On
+  Solana nothing changes for Phantom, Backpack and the rest.
+- `MorselCookieWalletAdapter` still works; new code uses `MorselWalletAdapter`.
+- `balanceSymbol` defaults to the network's gas token instead of `'COOK'`.
+- `payRpcUrl` throws for a network it does not know instead of answering Solana's RPC.
+- Solayer needs a Morsel wallet build that knows `solayer:mainnet`; an older build refuses it (safely).
 
 ## Upgrading from 0.2.x
 
@@ -314,8 +508,11 @@ npm run size         # what a dApp ships, minified and gzipped
 ```
 
 In the playground, `window.__mw` drives every stage: `__mw.relay.scan() / approve() / reject()`,
-`__mw.expireQr()`, `__mw.walletMode.mode = 'reject' | 'error' | 'hang'`, and the URL takes
-`theme`, `platform=ios|android|inapp`, `ext=1` (Morsel extension present) and `place=anchor`.
+`__mw.expireQr()`, `__mw.walletMode.mode = 'reject' | 'error' | 'hang'`, `__mw.chain.setChain('x1')`, and
+the URL takes `chain` (a network key, kept in the URL as you switch), `theme`,
+`platform=ios|android|inapp`, `ext=1` (Morsel extension present) and `place=anchor`. The control panel
+has a network switcher; the fake wallets advertise different networks (Backpack has Fogo, Glow Sonic SVM,
+none has Cookie Chain, X1 or Solayer), so the widget's filtering and "Morsel supports …" can be seen.
 
 ## License
 
